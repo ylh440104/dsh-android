@@ -39,35 +39,76 @@ jobs:
           cp -r nsis_extract/app_extract/resources/app.asar.unpacked asar_extract/app.asar.unpacked
           cp -r nsis_extract/app_extract/resources/runtime asar_extract/runtime
 
-      - name: Download Termux Node.js arm64
+      - name: Download Termux bootstrap and node packages
         run: |
-          curl -L -o node-arm64.deb "https://packages.termux.dev/apt/termux-main/pool/main/n/nodejs/nodejs_26.4.0-1_aarch64.deb"
-          mkdir -p node_arm64
-          dpkg-deb -x node-arm64.deb node_arm64
+          curl -sL "https://github.com/termux/termux-packages/releases/latest/download/bootstrap-aarch64.zip" -o bs-arm64.zip
+          curl -sL "https://github.com/termux/termux-packages/releases/latest/download/bootstrap-x86_64.zip" -o bs-x86_64.zip
+          mkdir -p bs_arm64 bs_x86_64
+          unzip -q bs-arm64.zip -d bs_arm64
+          unzip -q bs-x86_64.zip -d bs_x86_64
+          ls bs_arm64/lib | head -5
+          echo "bootstrap arm64 libs: $(ls bs_arm64/lib | wc -l)"
 
-      - name: Download Termux Node.js x86_64
+      - name: Download node and deps debs
         run: |
-          curl -L -o node-x86.deb "https://packages.termux.dev/apt/termux-main/pool/main/n/nodejs/nodejs_26.4.0-1_x86_64.deb"
-          mkdir -p node_x86
-          dpkg-deb -x node-x86.deb node_x86
+          mkdir -p debs
+          cd debs
+          BASE="https://packages.termux.dev/apt/termux-main/pool/main"
+          for spec in \
+            "$BASE/n/nodejs/nodejs_26.4.0-1_aarch64.deb:node-arm64" \
+            "$BASE/n/nodejs/nodejs_26.4.0-1_x86_64.deb:node-x86" \
+            "$BASE/libi/libicu/libicu_78.3_aarch64.deb:icu-arm64" \
+            "$BASE/libi/libicu/libicu_78.3_x86_64.deb:icu-x86" \
+            "$BASE/s/sqlite/sqlite_3.53.4_aarch64.deb:sqlite-arm64" \
+            "$BASE/s/sqlite/sqlite_3.53.4_x86_64.deb:sqlite-x86" \
+            "$BASE/c/c-ares/c-ares_1.34.8_aarch64.deb:cares-arm64" \
+            "$BASE/c/c-ares/c-ares_1.34.8_x86_64.deb:cares-x86" ; do
+            url="${spec%%:*}"
+            name="${spec##*:}"
+            curl -sL "$url" -o "$name.deb"
+            mkdir -p "$name"
+            dpkg-deb -x "$name.deb" "$name"
+            echo "$name: $(stat -c%s $name.deb) bytes"
+          done
+          cd ..
 
-      - name: Package node arm64
+      - name: Build node-arm64
         run: |
           mkdir -p out/node-arm64
-          cp -r node_arm64/data/data/com.termux/files/usr/* out/node-arm64/
+          cp -r bs_arm64/* out/node-arm64/
+          cp -r debs/node-arm64/data/data/com.termux/files/usr/* out/node-arm64/
+          cp -r debs/icu-arm64/data/data/com.termux/files/usr/* out/node-arm64/
+          cp -r debs/sqlite-arm64/data/data/com.termux/files/usr/* out/node-arm64/
+          cp -r debs/cares-arm64/data/data/com.termux/files/usr/* out/node-arm64/
+          cd out/node-arm64
+          bash -c 'while IFS="|" read -r link target; do [ -n "$link" ] && [ -n "$target" ] && ln -sf "$target" "$link" 2>/dev/null || true; done < SYMLINKS.txt'
+          cd ../..
           patchelf --set-interpreter /system/bin/linker64 out/node-arm64/bin/node || true
-          patchelf --set-rpath '$ORIGIN/../lib' out/node-arm64/bin/node || true
+          patchelf --set-rpath \$ORIGIN/../lib out/node-arm64/bin/node || true
+          echo "=== check deps ==="
+          for l in libz.so.1 libcares.so libsqlite3.so libffi.so libcrypto.so.3 libssl.so.3 libicui18n.so.78 libicuuc.so.78 libc++_shared.so; do
+            if ls out/node-arm64/lib/$l >/dev/null 2>&1; then echo "OK $l"; else echo "MISS $l"; fi
+          done
           cd out/node-arm64 && tar -cf ../../node-arm64.tar . && cd ../..
           xz -9 -T 0 node-arm64.tar
+          echo "node-arm64.tar.xz: $(stat -c%s node-arm64.tar.xz) bytes"
 
-      - name: Package node x86_64
+      - name: Build node-x86_64
         run: |
           mkdir -p out/node-x86_64
-          cp -r node_x86/data/data/com.termux/files/usr/* out/node-x86_64/
+          cp -r bs_x86_64/* out/node-x86_64/
+          cp -r debs/node-x86/data/data/com.termux/files/usr/* out/node-x86_64/
+          cp -r debs/icu-x86/data/data/com.termux/files/usr/* out/node-x86_64/
+          cp -r debs/sqlite-x86/data/data/com.termux/files/usr/* out/node-x86_64/
+          cp -r debs/cares-x86/data/data/com.termux/files/usr/* out/node-x86_64/
+          cd out/node-x86_64
+          bash -c 'while IFS="|" read -r link target; do [ -n "$link" ] && [ -n "$target" ] && ln -sf "$target" "$link" 2>/dev/null || true; done < SYMLINKS.txt'
+          cd ../..
           patchelf --set-interpreter /system/bin/linker64 out/node-x86_64/bin/node || true
-          patchelf --set-rpath '$ORIGIN/../lib' out/node-x86_64/bin/node || true
+          patchelf --set-rpath \$ORIGIN/../lib out/node-x86_64/bin/node || true
           cd out/node-x86_64 && tar -cf ../../node-x86_64.tar . && cd ../..
           xz -9 -T 0 node-x86_64.tar
+          echo "node-x86_64.tar.xz: $(stat -c%s node-x86_64.tar.xz) bytes"
 
       - name: Fetch linux native addons from npm
         run: |

@@ -198,7 +198,7 @@ jobs:
           path: app/build/outputs/apk/debug/*.apk
           retention-days: 30
 
-  emulator-test:
+  e2e-test:
     needs: [build-apk, verify-extract]
     runs-on: ubuntu-latest
     steps:
@@ -211,66 +211,85 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
-          name: dsh-apk
-          path: ./apk
-
-      - uses: actions/download-artifact@v4
-        with:
           name: runtime-assets
           path: ./assets
 
-      - name: Enable KVM
+      - name: Download xz jar
+        run: curl -L -o xz.jar "https://repo1.maven.org/maven2/org/tukaani/xz/1.10/xz-1.10.jar"
+
+      - name: Compile extractor
         run: |
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-          sudo udevadm control --reload-rules
-          sudo udevadm trigger --name-match=kvm
+          mkdir -p classes
+          javac -d classes app/src/main/java/com/deepseek/harness/Tar.java
+          javac -cp classes:xz.jar -d classes tools/TestExtract.java
 
-      - name: Run on emulator
-        uses: reactivecircus/android-emulator-runner@v2
-        with:
-          api-level: 34
-          arch: x86_64
-          target: google_apis
-          force-avd-creation: true
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
-          disable-animations: true
-          script: |
-            set -x
-            adb install -r apk/*.apk
-            adb shell mkdir -p /sdcard/Android/data/com.deepseek.harness/files
-            adb push assets/node-x86_64.tar.xz /sdcard/Android/data/com.deepseek.harness/files/node-x86_64.tar.xz
-            adb push assets/runtime.tar.xz /sdcard/Android/data/com.deepseek.harness/files/runtime.tar.xz
-            adb shell ls -la /sdcard/Android/data/com.deepseek.harness/files/
-            adb shell am start -n com.deepseek.harness/.MainActivity
-            sleep 150
-            echo "=== logcat ==="
-            adb logcat -d | grep -i "deepseek\|harness\|node\|Tar\|MainActivity\|AndroidRuntime" | tail -60 || true
-            echo "=== node bin ==="
-            adb shell "run-as com.deepseek.harness ls -la files/node/bin/" || true
-            echo "=== assert node ==="
-            adb shell "run-as com.deepseek.harness ls files/node/bin/node"
-            echo "=== assert host entry ==="
-            adb shell "run-as com.deepseek.harness ls files/dsh-home/runtime/node_modules/@deepseek-ai/dsh-desktop-host/lib/index.js"
-            echo "=== assert server ==="
-            RESP=$(adb shell "toybox wget -q -O - http://127.0.0.1:19387/ 2>/dev/null | head -c 300")
-            echo "RESP=$RESP"
-            echo "$RESP" | grep -qi "html\|<div\|<script\|deepseek\|harness"
-            echo "SERVER VERIFIED"
-
-      - name: Dump logcat
-        if: always()
+      - name: Extract runtime with app code
         run: |
-          adb logcat -d > full_logcat.txt 2>/dev/null || true
+          rm -rf home && mkdir -p home
+          java -cp classes:xz.jar TestExtract assets/runtime.tar.xz home
 
-      - uses: actions/upload-artifact@v4
+      - name: Setup node (matches termux version)
+        run: |
+          curl -L -o node.tar.xz "https://nodejs.org/dist/v24.18.1/node-v24.18.1-linux-arm64.tar.xz" || curl -L -o node.tar.xz "https://nodejs.org/dist/v24.18.1/node-v24.18.1-linux-x64.tar.xz"
+          mkdir -p nodehome && tar xf node.tar.xz -C nodehome --strip-components=1
+          nodehome/bin/node -v
+
+      - name: Prepare profile
+        run: |
+          mkdir -p home/profiles/desktop
+          printf '%s' '{"name":"desktop","private":true,"type":"module","dsh":{"profile":{"bundles":["@deepseek-ai/dsh-base","@deepseek-ai/dsh-web-app"]}}}' > home/profiles/desktop/package.json
+          printf '[]\n' > home/profiles/desktop/cordis.patch.yml
+
+      - name: Assert native addons present
+        run: |
+          ls home/node_modules/ | grep node-addon-require-builtin
+          ARCH=$(uname -m)
+          if [ "$ARCH" = "x86_64" ]; then PKG=linux-x64-gnu; else PKG=linux-arm64-gnu; fi
+          find home/node_modules/node-addon-require-builtin-$PKG -name '*.node' | grep .
+          echo "native addon for $PKG present"
+
+      - name: Start host and verify web server
+        run: |
+          cd home/profiles/desktop
+          export DSH_HOME=$PWD/../..
+          nohup $GITHUB_WORKSPACE/nodehome/bin/node --expose-internals \
+            $GITHUB_WORKSPACE/home/node_modules/@deepseek-ai/dsh-desktop-host/lib/index.js \
+            $GITHUB_WORKSPACE/home \
+            $GITHUB_WORKSPACE/home/profiles/desktop \
+            $GITHUB_WORKSPACE/home/primary-runtime > $GITHUB_WORKSPACE/host.log 2>&1 &
+          echo "waiting for host..."
+          for i in $(seq 1 60); do
+            if grep -q "dsh web: http" $GITHUB_WORKSPACE/host.log 2>/dev/null; then
+              echo "host is up after ${i}0s"
+              break
+            fi
+            sleep 10
+          done
+          echo "=== host log ==="
+          cat $GITHUB_WORKSPACE/host.log
+          grep -q "dsh web: http" $GITHUB_WORKSPACE/host.log || (echo "HOST DID NOT START" && exit 1)
+
+      - name: Verify web UI responds
+        run: |
+          TOKEN=$(grep -o 'token=[A-Za-z0-9_-]*' $GITHUB_WORKSPACE/host.log | tail -1 | cut -d= -f2)
+          echo "token=$TOKEN"
+          curl -s -c /tmp/ck -o /dev/null "http://127.0.0.1:19387/?token=$TOKEN"
+          BODY=$(curl -s -b /tmp/ck "http://127.0.0.1:19387/")
+          echo "$BODY" | head -c 500
+          echo ""
+          echo "$BODY" | grep -q "__DSH_CONTACT_CONFIG__" || (echo "WEB UI INVALID" && exit 1)
+          echo "WEB UI VERIFIED"
+
+      - name: Upload host log
         if: always()
+        uses: actions/upload-artifact@v4
         with:
-          name: emulator-logs
-          path: full_logcat.txt
+          name: host-log
+          path: host.log
           if-no-files-found: ignore
 
   release:
-    needs: [build-apk, emulator-test]
+    needs: [build-apk, e2e-test]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     steps:

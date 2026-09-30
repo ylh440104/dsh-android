@@ -1,0 +1,130 @@
+name: Build APK and Runtime
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-runtime:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y p7zip-full xz-utils ar
+
+      - name: Download original Windows installer
+        run: |
+          curl -L -o dsh-installer.exe "https://download.deepseek.com/dsh-desk/bin/win-x64/deepseek-harness-0.2.0-rc.1-win-x64.exe"
+
+      - name: Extract NSIS installer
+        run: |
+          mkdir -p nsis_extract
+          cd nsis_extract
+          7z x ../dsh-installer.exe -y
+          mkdir -p app_extract
+          cd app_extract
+          7z x "../\$PLUGINSDIR/app-64.7z" -y
+
+      - name: Extract app.asar
+        run: |
+          mkdir -p asar_extract
+          npx @electron/asar extract nsis_extract/app_extract/resources/app.asar asar_extract
+          cp -r nsis_extract/app_extract/resources/app.asar.unpacked asar_extract/app.asar.unpacked
+          cp -r nsis_extract/app_extract/resources/runtime asar_extract/runtime
+
+      - name: Download Termux Node.js 22 arm64
+        run: |
+          mkdir -p node_extract
+          curl -L -o node-pkg.deb "https://github.com/termux/termux-nodejs-distro/releases/download/v22.14.0/nodejs-22.14.0_aarch64.deb"
+          cd node_extract
+          ar x ../node-pkg.deb
+          tar xf data.tar.*
+
+      - name: Package runtime tarball
+        run: |
+          mkdir -p runtime-pkg/runtime
+          cp -r asar_extract/dsh/* runtime-pkg/runtime/
+          cp -rn asar_extract/app.asar.unpacked/dsh/node_modules/* runtime-pkg/runtime/node_modules/
+          cp -r asar_extract/runtime/* runtime-pkg/
+
+          mkdir -p node-pkg
+          cp -r node_extract/data/data/com.termux/files/usr/* node-pkg/
+
+          cd runtime-pkg
+          tar -cf ../runtime-arm64.tar .
+          xz -9 -T 0 ../runtime-arm64.tar
+
+          cd ../node-pkg
+          tar -cf ../node-arm64.tar .
+          xz -9 -T 0 ../node-arm64.tar
+
+      - name: Upload runtime artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: runtime-assets
+          path: |
+            runtime-arm64.tar.xz
+            node-arm64.tar.xz
+          retention-days: 1
+
+  build-apk:
+    needs: build-runtime
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+
+      - name: Build debug APK
+        run: gradle assembleDebug --no-daemon --stacktrace
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: dsh-android-apk
+          path: app/build/outputs/apk/**/*.apk
+          retention-days: 30
+
+      - name: Download runtime assets
+        uses: actions/download-artifact@v4
+        with:
+          name: runtime-assets
+          path: ./release-assets
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          files: |
+            release-assets/runtime-arm64.tar.xz
+            release-assets/node-arm64.tar.xz
+            app/build/outputs/apk/**/*.apk
+          draft: false
+          prerelease: true

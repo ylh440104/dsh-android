@@ -1,0 +1,2 @@
+-keep class com.deepseek.harness.** { *; }
+-keep class * { *; }

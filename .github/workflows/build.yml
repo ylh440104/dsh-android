@@ -54,41 +54,35 @@ jobs:
           mkdir -p debs
           cd debs
           BASE="https://packages.termux.dev/apt/termux-main/pool/main"
-          for spec in \
-            "$BASE/n/nodejs/nodejs_26.4.0-1_aarch64.deb:node-arm64" \
-            "$BASE/n/nodejs/nodejs_26.4.0-1_x86_64.deb:node-x86" \
-            "$BASE/libi/libicu/libicu_78.3_aarch64.deb:icu-arm64" \
-            "$BASE/libi/libicu/libicu_78.3_x86_64.deb:icu-x86" \
-            "$BASE/s/sqlite/sqlite_3.53.4_aarch64.deb:sqlite-arm64" \
-            "$BASE/s/sqlite/sqlite_3.53.4_x86_64.deb:sqlite-x86" \
-            "$BASE/c/c-ares/c-ares_1.34.8_aarch64.deb:cares-arm64" \
-            "$BASE/c/c-ares/c-ares_1.34.8_x86_64.deb:cares-x86" ; do
-            url="${spec%%:*}"
-            name="${spec##*:}"
-            curl -sL "$url" -o "$name.deb"
+          fetch() {
+            name="$1"
+            path="$2"
+            curl -sL "$BASE/$path" -o "$name.deb"
             mkdir -p "$name"
             dpkg-deb -x "$name.deb" "$name"
             echo "$name: $(stat -c%s $name.deb) bytes"
-          done
+          }
+          fetch node-arm64 n/nodejs/nodejs_26.4.0-1_aarch64.deb
+          fetch node-x86 n/nodejs/nodejs_26.4.0-1_x86_64.deb
+          fetch icu-arm64 libi/libicu/libicu_78.3_aarch64.deb
+          fetch icu-x86 libi/libicu/libicu_78.3_x86_64.deb
+          fetch sqlite-arm64 s/sqlite/sqlite_3.53.4_aarch64.deb
+          fetch sqlite-x86 s/sqlite/sqlite_3.53.4_x86_64.deb
+          fetch cares-arm64 c/c-ares/c-ares_1.34.8_aarch64.deb
+          fetch cares-x86 c/c-ares/c-ares_1.34.8_x86_64.deb
           cd ..
 
       - name: Build node-arm64
         run: |
           mkdir -p out/node-arm64
-          cp -r bs_arm64/* out/node-arm64/
-          cp -r debs/node-arm64/data/data/com.termux/files/usr/* out/node-arm64/
-          cp -r debs/icu-arm64/data/data/com.termux/files/usr/* out/node-arm64/
-          cp -r debs/sqlite-arm64/data/data/com.termux/files/usr/* out/node-arm64/
-          cp -r debs/cares-arm64/data/data/com.termux/files/usr/* out/node-arm64/
-          cd out/node-arm64
-          bash -c 'while IFS="|" read -r link target; do [ -n "$link" ] && [ -n "$target" ] && ln -sf "$target" "$link" 2>/dev/null || true; done < SYMLINKS.txt'
-          cd ../..
+          cp -r bs_arm64/. out/node-arm64/
+          cp -r debs/node-arm64/data/data/com.termux/files/usr/. out/node-arm64/
+          cp -r debs/icu-arm64/data/data/com.termux/files/usr/. out/node-arm64/
+          cp -r debs/sqlite-arm64/data/data/com.termux/files/usr/. out/node-arm64/
+          cp -r debs/cares-arm64/data/data/com.termux/files/usr/. out/node-arm64/
+          python3 tools/fixlibs.py out/node-arm64
           patchelf --set-interpreter /system/bin/linker64 out/node-arm64/bin/node || true
-          patchelf --set-rpath \$ORIGIN/../lib out/node-arm64/bin/node || true
-          echo "=== check deps ==="
-          for l in libz.so.1 libcares.so libsqlite3.so libffi.so libcrypto.so.3 libssl.so.3 libicui18n.so.78 libicuuc.so.78 libc++_shared.so; do
-            if ls out/node-arm64/lib/$l >/dev/null 2>&1; then echo "OK $l"; else echo "MISS $l"; fi
-          done
+          patchelf --set-rpath '$ORIGIN/../lib' out/node-arm64/bin/node || true
           cd out/node-arm64 && tar -cf ../../node-arm64.tar . && cd ../..
           xz -9 -T 0 node-arm64.tar
           echo "node-arm64.tar.xz: $(stat -c%s node-arm64.tar.xz) bytes"
@@ -96,16 +90,14 @@ jobs:
       - name: Build node-x86_64
         run: |
           mkdir -p out/node-x86_64
-          cp -r bs_x86_64/* out/node-x86_64/
-          cp -r debs/node-x86/data/data/com.termux/files/usr/* out/node-x86_64/
-          cp -r debs/icu-x86/data/data/com.termux/files/usr/* out/node-x86_64/
-          cp -r debs/sqlite-x86/data/data/com.termux/files/usr/* out/node-x86_64/
-          cp -r debs/cares-x86/data/data/com.termux/files/usr/* out/node-x86_64/
-          cd out/node-x86_64
-          bash -c 'while IFS="|" read -r link target; do [ -n "$link" ] && [ -n "$target" ] && ln -sf "$target" "$link" 2>/dev/null || true; done < SYMLINKS.txt'
-          cd ../..
+          cp -r bs_x86_64/. out/node-x86_64/
+          cp -r debs/node-x86/data/data/com.termux/files/usr/. out/node-x86_64/
+          cp -r debs/icu-x86/data/data/com.termux/files/usr/. out/node-x86_64/
+          cp -r debs/sqlite-x86/data/data/com.termux/files/usr/. out/node-x86_64/
+          cp -r debs/cares-x86/data/data/com.termux/files/usr/. out/node-x86_64/
+          python3 tools/fixlibs.py out/node-x86_64
           patchelf --set-interpreter /system/bin/linker64 out/node-x86_64/bin/node || true
-          patchelf --set-rpath \$ORIGIN/../lib out/node-x86_64/bin/node || true
+          patchelf --set-rpath '$ORIGIN/../lib' out/node-x86_64/bin/node || true
           cd out/node-x86_64 && tar -cf ../../node-x86_64.tar . && cd ../..
           xz -9 -T 0 node-x86_64.tar
           echo "node-x86_64.tar.xz: $(stat -c%s node-x86_64.tar.xz) bytes"

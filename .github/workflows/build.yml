@@ -228,9 +228,14 @@ jobs:
           rm -rf home && mkdir -p home
           java -cp classes:xz.jar TestExtract assets/runtime.tar.xz home
 
-      - name: Setup node (matches termux version)
+      - name: Setup node
         run: |
-          curl -L -o node.tar.xz "https://nodejs.org/dist/v24.18.1/node-v24.18.1-linux-arm64.tar.xz" || curl -L -o node.tar.xz "https://nodejs.org/dist/v24.18.1/node-v24.18.1-linux-x64.tar.xz"
+          case "$(uname -m)" in
+            x86_64) NARCH=x64 ;;
+            aarch64|arm64) NARCH=arm64 ;;
+            *) NARCH=x64 ;;
+          esac
+          curl -fL -o node.tar.xz "https://nodejs.org/dist/v24.18.1/node-v24.18.1-linux-$NARCH.tar.xz"
           mkdir -p nodehome && tar xf node.tar.xz -C nodehome --strip-components=1
           nodehome/bin/node -v
 

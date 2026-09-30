@@ -189,30 +189,6 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Setup Android SDK
-        run: |
-          export ANDROID_HOME=$HOME/android-sdk
-          mkdir -p $ANDROID_HOME/cmdline-tools
-          cd $ANDROID_HOME/cmdline-tools
-          wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O cmdline-tools.zip
-          unzip -q cmdline-tools.zip
-          mv cmdline-tools latest
-          rm cmdline-tools.zip
-          export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH
-          yes | sdkmanager --licenses > /dev/null 2>&1 || true
-          sdkmanager "platform-tools" "platforms;android-34" "emulator" "system-images;android-34;google_apis;x86_64"
-          echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
-          echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> $GITHUB_ENV
-          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> $GITHUB_PATH
-          echo "$ANDROID_HOME/platform-tools" >> $GITHUB_PATH
-          echo "$ANDROID_HOME/emulator" >> $GITHUB_PATH
-
-      - name: Enable KVM
-        run: |
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-          sudo udevadm control --reload-rules
-          sudo udevadm trigger --subsystem-match=misc
-
       - uses: actions/download-artifact@v4
         with:
           name: dsh-apk
@@ -223,73 +199,55 @@ jobs:
           name: runtime-assets
           path: ./assets
 
-      - name: Cache avd
-        uses: actions/cache@v4
-        id: avd-cache
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Run on emulator
+        uses: reactivecircus/android-emulator-runner@v2
         with:
-          path: |
-            ~/.android/avd/*
-            ~/.android/adb*
-          key: avd-api34
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          force-avd-creation: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          disable-animations: true
+          script: |
+            set -x
+            adb install -r apk/*.apk
+            adb shell mkdir -p /sdcard/Android/data/com.deepseek.harness/files
+            adb push assets/node-x86_64.tar.xz /sdcard/Android/data/com.deepseek.harness/files/node-x86_64.tar.xz
+            adb push assets/runtime.tar.xz /sdcard/Android/data/com.deepseek.harness/files/runtime.tar.xz
+            adb shell ls -la /sdcard/Android/data/com.deepseek.harness/files/
+            adb shell am start -n com.deepseek.harness/.MainActivity
+            sleep 150
+            echo "=== logcat ==="
+            adb logcat -d | grep -i "deepseek\|harness\|node\|Tar\|MainActivity\|AndroidRuntime" | tail -60 || true
+            echo "=== node bin ==="
+            adb shell "run-as com.deepseek.harness ls -la files/node/bin/" || true
+            echo "=== assert node ==="
+            adb shell "run-as com.deepseek.harness ls files/node/bin/node"
+            echo "=== assert host entry ==="
+            adb shell "run-as com.deepseek.harness ls files/dsh-home/runtime/node_modules/@deepseek-ai/dsh-desktop-host/lib/index.js"
+            echo "=== assert server ==="
+            RESP=$(adb shell "toybox wget -q -O - http://127.0.0.1:19387/ 2>/dev/null | head -c 300")
+            echo "RESP=$RESP"
+            echo "$RESP" | grep -qi "html\|<div\|<script\|deepseek\|harness"
+            echo "SERVER VERIFIED"
 
-      - name: Create AVD
-        if: steps.avd-cache.outputs.cache-hit != 'true'
-        run: |
-          sudo apt-get install -y qemu-kvm libvirt-daemon-system
-          echo no | $ANDROID_HOME/cmdline-tools/latest/bin/avdmanager create avd -n test -k "system-images;android-34;google_apis;x86_64" -f
-        env:
-          ANDROID_HOME: ${{ env.ANDROID_HOME }}
-
-      - name: Boot emulator
-        run: |
-          $ANDROID_HOME/emulator/emulator -avd test -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect &
-          adb wait-for-device
-          timeout 300 bash -c 'until adb shell getprop sys.boot_completed | grep -q 1; do sleep 5; done'
-          echo "emulator booted"
-
-      - name: Install APK
-        run: adb install -r apk/*.apk
-
-      - name: Push local runtime assets
-        run: |
-          adb shell mkdir -p /sdcard/Android/data/com.deepseek.harness/files
-          adb push assets/node-x86_64.tar.xz /sdcard/Android/data/com.deepseek.harness/files/node-x86_64.tar.xz
-          adb push assets/runtime.tar.xz /sdcard/Android/data/com.deepseek.harness/files/runtime.tar.xz
-          adb shell ls -la /sdcard/Android/data/com.deepseek.harness/files/
-
-      - name: Launch app
-        run: |
-          adb shell am start -n com.deepseek.harness/.MainActivity
-          sleep 90
-
-      - name: Assert node extracted
-        run: |
-          adb shell "run-as com.deepseek.harness ls -la files/node/bin/"
-          adb shell "run-as com.deepseek.harness ls files/node/bin/node" || (echo "NODE BINARY MISSING" && adb logcat -d | tail -200 && exit 1)
-          echo "node binary present"
-
-      - name: Assert runtime extracted
-        run: |
-          adb shell "run-as com.deepseek.harness ls files/dsh-home/runtime/node_modules/@deepseek-ai/dsh-desktop-host/lib/index.js" || (echo "HOST ENTRY MISSING" && exit 1)
-          echo "host entry present"
-
-      - name: Assert server responding
-        run: |
-          adb shell "run-as com.deepseek.harness sh -c 'echo GET / HTTP/1.0 | nc 127.0.0.1 19387 2>/dev/null | head -5'" || true
-          adb shell "toybox wget -q -O - http://127.0.0.1:19387/ 2>&1 | head -20" || true
-          HTTP=$(adb shell "toybox wget -q -O - http://127.0.0.1:19387/ 2>/dev/null | head -c 200")
-          echo "RESPONSE: $HTTP"
-          echo "$HTTP" | grep -qi "html\|deepseek\|harness\|<div\|<script" && echo "SERVER OK" || (echo "SERVER NOT RESPONDING" && adb logcat -d | tail -200 && exit 1)
-
-      - name: Dump logs
+      - name: Dump logcat
         if: always()
-        run: adb logcat -d > full_logcat.txt
+        run: |
+          adb logcat -d > full_logcat.txt 2>/dev/null || true
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: emulator-logs
           path: full_logcat.txt
+          if-no-files-found: ignore
 
   release:
     needs: [build-apk, emulator-test]

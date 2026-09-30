@@ -82,7 +82,7 @@ jobs:
           cp -r debs/cares-arm64/data/data/com.termux/files/usr/. out/node-arm64/
           python3 tools/fixlibs.py out/node-arm64
           patchelf --set-interpreter /system/bin/linker64 out/node-arm64/bin/node || true
-          patchelf --set-rpath '$ORIGIN/../lib' out/node-arm64/bin/node || true
+          patchelf --set-rpath '\$ORIGIN/../lib' out/node-arm64/bin/node || true
           cd out/node-arm64 && tar -cf ../../node-arm64.tar . && cd ../..
           xz -9 -T 0 node-arm64.tar
           echo "node-arm64.tar.xz: $(stat -c%s node-arm64.tar.xz) bytes"
@@ -97,7 +97,7 @@ jobs:
           cp -r debs/cares-x86/data/data/com.termux/files/usr/. out/node-x86_64/
           python3 tools/fixlibs.py out/node-x86_64
           patchelf --set-interpreter /system/bin/linker64 out/node-x86_64/bin/node || true
-          patchelf --set-rpath '$ORIGIN/../lib' out/node-x86_64/bin/node || true
+          patchelf --set-rpath '\$ORIGIN/../lib' out/node-x86_64/bin/node || true
           cd out/node-x86_64 && tar -cf ../../node-x86_64.tar . && cd ../..
           xz -9 -T 0 node-x86_64.tar
           echo "node-x86_64.tar.xz: $(stat -c%s node-x86_64.tar.xz) bytes"

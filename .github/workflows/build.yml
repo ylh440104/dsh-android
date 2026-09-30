@@ -101,7 +101,9 @@ jobs:
         uses: gradle/actions/setup-gradle@v3
 
       - name: Build debug APK
-        run: gradle assembleDebug --no-daemon --stacktrace --no-build-cache
+        run: |
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
+          gradle assembleDebug --no-daemon --stacktrace --no-build-cache
 
       - name: Upload APK
         uses: actions/upload-artifact@v4

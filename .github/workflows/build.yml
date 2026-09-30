@@ -41,9 +41,9 @@ jobs:
           cp -r nsis_extract/app_extract/resources/app.asar.unpacked asar_extract/app.asar.unpacked
           cp -r nsis_extract/app_extract/resources/runtime asar_extract/runtime
 
-      - name: Download Termux Node.js 22 arm64
+      - name: Download Termux Node.js arm64
         run: |
-          curl -L -o node-pkg.deb "https://github.com/termux/termux-nodejs-distro/releases/download/v22.14.0/nodejs-22.14.0_aarch64.deb"
+          curl -L -o node-pkg.deb "https://packages.termux.dev/apt/termux-main/pool/main/n/nodejs/nodejs_26.4.0-1_aarch64.deb"
           mkdir -p node_extract
           dpkg-deb -x node-pkg.deb node_extract
 

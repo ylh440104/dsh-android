@@ -20,8 +20,8 @@ public class NodeLauncher {
     private Process process;
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private static final String RUNTIME_VERSION = "0.2.0-rc.1";
-    private static final String RUNTIME_URL = "https://github.com/deepseek-ai/dsh-android/releases/download/v0.2.0-rc.1/runtime-arm64.tar.xz";
-    private static final String NODE_URL = "https://github.com/deepseek-ai/dsh-android/releases/download/v0.2.0-rc.1/node-arm64.tar.xz";
+    private static final String RUNTIME_URL = "https://github.com/ylh440104/dsh-android/releases/download/v0.2.0-rc.1/runtime-arm64.tar.xz";
+    private static final String NODE_URL = "https://github.com/ylh440104/dsh-android/releases/download/v0.2.0-rc.1/node-arm64.tar.xz";
 
     public interface Callback {
         void onReady(String url);

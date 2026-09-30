@@ -10,8 +10,8 @@ android {
         applicationId "com.deepseek.harness"
         minSdk 26
         targetSdk 34
-        versionCode 2
-        versionName "0.2.0-rc.2"
+        versionCode 3
+        versionName "0.2.0-rc.3"
     }
 
     buildTypes {

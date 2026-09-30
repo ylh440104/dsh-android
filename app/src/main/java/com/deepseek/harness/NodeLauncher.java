@@ -21,8 +21,8 @@ public class NodeLauncher {
     private final Context context;
     private Process process;
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
-    private static final String RUNTIME_VERSION = "0.2.0-rc.2";
-    private static final String BASE_URL = "https://github.com/ylh440104/dsh-android/releases/download/v0.2.0-rc.2/";
+    private static final String RUNTIME_VERSION = "0.2.0-rc.3";
+    private static final String BASE_URL = "https://github.com/ylh440104/dsh-android/releases/download/v0.2.0-rc.3/";
 
     public interface Callback {
         void onReady(String url);
@@ -80,6 +80,7 @@ public class NodeLauncher {
                 nodeBin.setExecutable(true, true);
 
                 setupProfile(homeDir);
+                linkOfficeNode(homeDir, nodeBin);
 
                 String nodeBinPath = nodeDir.getAbsolutePath() + "/bin";
                 String ldLibPath = nodeDir.getAbsolutePath() + "/lib:/system/lib64:/system/lib:/vendor/lib64:/vendor/lib";
@@ -183,6 +184,28 @@ public class NodeLauncher {
             FileOutputStream fos = new FileOutputStream(patch);
             fos.write("[]\n".getBytes());
             fos.close();
+        }
+    }
+
+    private void linkOfficeNode(File homeDir, File nodeBin) {
+        File officeNode = new File(homeDir, "primary-runtime/dependencies/node/bin/node");
+        if (officeNode.exists()) return;
+        try {
+            File parent = officeNode.getParentFile();
+            if (parent != null && !parent.exists()) parent.mkdirs();
+            java.nio.file.Files.createSymbolicLink(officeNode.toPath(), nodeBin.toPath());
+        } catch (Exception e) {
+            try {
+                java.io.FileInputStream in = new java.io.FileInputStream(nodeBin);
+                FileOutputStream out = new FileOutputStream(officeNode);
+                byte[] buf = new byte[65536];
+                int n;
+                while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+                in.close();
+                out.close();
+                officeNode.setExecutable(true, false);
+            } catch (Exception ignored) {
+            }
         }
     }
 

@@ -1,4 +1,4 @@
-name: Build APK and Runtime
+name: Build and Verify
 
 on:
   push:
@@ -13,16 +13,14 @@ jobs:
   build-runtime:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: '22'
 
       - name: Install tools
-        run: sudo apt-get install -y p7zip-full xz-utils
+        run: sudo apt-get install -y p7zip-full xz-utils patchelf
 
       - name: Download original Windows installer
         run: curl -L -o dsh-installer.exe "https://download.deepseek.com/dsh-desk/bin/win-x64/deepseek-harness-0.2.0-rc.1-win-x64.exe"
@@ -43,42 +41,109 @@ jobs:
 
       - name: Download Termux Node.js arm64
         run: |
-          curl -L -o node-pkg.deb "https://packages.termux.dev/apt/termux-main/pool/main/n/nodejs/nodejs_26.4.0-1_aarch64.deb"
-          mkdir -p node_extract
-          dpkg-deb -x node-pkg.deb node_extract
-          sudo apt-get install -y patchelf
+          curl -L -o node-arm64.deb "https://packages.termux.dev/apt/termux-main/pool/main/n/nodejs/nodejs_26.4.0-1_aarch64.deb"
+          mkdir -p node_arm64
+          dpkg-deb -x node-arm64.deb node_arm64
 
-      - name: Package runtime tarball
+      - name: Download Termux Node.js x86_64
         run: |
-          mkdir -p runtime-pkg/runtime
-          cp -r asar_extract/dsh/* runtime-pkg/runtime/
-          cp -rn asar_extract/app.asar.unpacked/dsh/node_modules/* runtime-pkg/runtime/node_modules/
-          cp -r asar_extract/runtime/* runtime-pkg/
-          mkdir -p node-pkg
-          cp -r node_extract/data/data/com.termux/files/usr/* node-pkg/
-          patchelf --set-interpreter /system/bin/linker64 node-pkg/bin/node || true
-          patchelf --set-rpath '$ORIGIN/../lib' node-pkg/bin/node || true
-          cd runtime-pkg && tar -cf ../runtime-arm64.tar . && xz -9 -T 0 ../runtime-arm64.tar
-          cd ../node-pkg && tar -cf ../node-arm64.tar . && xz -9 -T 0 ../node-arm64.tar
+          curl -L -o node-x86.deb "https://packages.termux.dev/apt/termux-main/pool/main/n/nodejs/nodejs_26.4.0-1_x86_64.deb"
+          mkdir -p node_x86
+          dpkg-deb -x node-x86.deb node_x86
 
-      - name: Upload runtime artifacts
-        uses: actions/upload-artifact@v4
+      - name: Package node arm64
+        run: |
+          mkdir -p out/node-arm64
+          cp -r node_arm64/data/data/com.termux/files/usr/* out/node-arm64/
+          patchelf --set-interpreter /system/bin/linker64 out/node-arm64/bin/node || true
+          patchelf --set-rpath '$ORIGIN/../lib' out/node-arm64/bin/node || true
+          cd out/node-arm64 && tar -cf ../../node-arm64.tar . && cd ../..
+          xz -9 -T 0 node-arm64.tar
+
+      - name: Package node x86_64
+        run: |
+          mkdir -p out/node-x86_64
+          cp -r node_x86/data/data/com.termux/files/usr/* out/node-x86_64/
+          patchelf --set-interpreter /system/bin/linker64 out/node-x86_64/bin/node || true
+          patchelf --set-rpath '$ORIGIN/../lib' out/node-x86_64/bin/node || true
+          cd out/node-x86_64 && tar -cf ../../node-x86_64.tar . && cd ../..
+          xz -9 -T 0 node-x86_64.tar
+
+      - name: Package runtime
+        run: |
+          mkdir -p out/runtime
+          cp -r asar_extract/dsh/* out/runtime/
+          cp -rn asar_extract/app.asar.unpacked/dsh/node_modules/* out/runtime/node_modules/ 2>/dev/null || true
+          cp -r asar_extract/runtime/* out/runtime/
+          cd out/runtime && tar -cf ../../runtime.tar . && cd ../..
+          xz -9 -T 0 runtime.tar
+
+      - uses: actions/upload-artifact@v4
         with:
           name: runtime-assets
           path: |
-            runtime-arm64.tar.xz
             node-arm64.tar.xz
+            node-x86_64.tar.xz
+            runtime.tar.xz
           retention-days: 1
 
-  build-apk:
+  verify-extract:
     needs: build-runtime
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Java
-        uses: actions/setup-java@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: runtime-assets
+          path: ./assets
+
+      - name: Download xz jar
+        run: curl -L -o xz.jar "https://repo1.maven.org/maven2/org/tukaani/xz/1.10/xz-1.10.jar"
+
+      - name: Compile extractor
+        run: |
+          mkdir -p classes
+          javac -d classes app/src/main/java/com/deepseek/harness/Tar.java
+          javac -cp classes:xz.jar -d classes tools/TestExtract.java
+
+      - name: Verify node-arm64 archive
+        run: |
+          java -cp classes:xz.jar TestExtract assets/node-arm64.tar.xz /tmp/n1
+          test -f /tmp/n1/bin/node || (echo "MISSING node-arm64/bin/node" && exit 1)
+          ls -la /tmp/n1/bin/node
+          echo "node-arm64 OK"
+
+      - name: Verify node-x86_64 archive
+        run: |
+          java -cp classes:xz.jar TestExtract assets/node-x86_64.tar.xz /tmp/n2
+          test -f /tmp/n2/bin/node || (echo "MISSING node-x86_64/bin/node" && exit 1)
+          echo "node-x86_64 OK"
+
+      - name: Verify runtime archive
+        run: |
+          java -cp classes:xz.jar TestExtract assets/runtime.tar.xz /tmp/r1
+          test -f /tmp/r1/node_modules/@deepseek-ai/dsh-desktop-host/lib/index.js || (echo "MISSING host entry" && exit 1)
+          echo "host entry OK"
+          test -d /tmp/r1/node_modules/@deepseek-ai/dsh-base || (echo "MISSING dsh-base" && exit 1)
+          echo "dsh-base OK"
+          test -d /tmp/r1/node_modules/@deepseek-ai/dsh-web-app || (echo "MISSING dsh-web-app" && exit 1)
+          echo "dsh-web-app OK"
+          ls /tmp/r1/node_modules/@deepseek-ai/ | head -30
+          echo "runtime OK"
+
+  build-apk:
+    needs: verify-extract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
@@ -100,45 +165,162 @@ jobs:
           echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> $GITHUB_PATH
           echo "$ANDROID_HOME/platform-tools" >> $GITHUB_PATH
 
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v3
+      - uses: gradle/actions/setup-gradle@v3
 
-      - name: Build debug APK
+      - name: Build APK
         run: |
           echo "sdk.dir=$ANDROID_HOME" > local.properties
-          gradle assembleDebug --no-daemon --stacktrace --no-build-cache
+          gradle assembleDebug --no-daemon --stacktrace
 
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
-          name: dsh-android-apk
-          path: app/build/outputs/apk/**/*.apk
+          name: dsh-apk
+          path: app/build/outputs/apk/debug/*.apk
           retention-days: 30
 
-      - name: Download runtime assets
-        uses: actions/download-artifact@v4
+  emulator-test:
+    needs: [build-apk, verify-extract]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Android SDK
+        run: |
+          export ANDROID_HOME=$HOME/android-sdk
+          mkdir -p $ANDROID_HOME/cmdline-tools
+          cd $ANDROID_HOME/cmdline-tools
+          wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O cmdline-tools.zip
+          unzip -q cmdline-tools.zip
+          mv cmdline-tools latest
+          rm cmdline-tools.zip
+          export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH
+          yes | sdkmanager --licenses > /dev/null 2>&1 || true
+          sdkmanager "platform-tools" "platforms;android-34" "emulator" "system-images;android-34;google_apis;x86_64"
+          echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
+          echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> $GITHUB_ENV
+          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> $GITHUB_PATH
+          echo "$ANDROID_HOME/platform-tools" >> $GITHUB_PATH
+          echo "$ANDROID_HOME/emulator" >> $GITHUB_PATH
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --subsystem-match=misc
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: dsh-apk
+          path: ./apk
+
+      - uses: actions/download-artifact@v4
         with:
           name: runtime-assets
-          path: ./release-assets
+          path: ./assets
+
+      - name: Cache avd
+        uses: actions/cache@v4
+        id: avd-cache
+        with:
+          path: |
+            ~/.android/avd/*
+            ~/.android/adb*
+          key: avd-api34
+
+      - name: Create AVD
+        if: steps.avd-cache.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get install -y qemu-kvm libvirt-daemon-system
+          echo no | $ANDROID_HOME/cmdline-tools/latest/bin/avdmanager create avd -n test -k "system-images;android-34;google_apis;x86_64" -f
+        env:
+          ANDROID_HOME: ${{ env.ANDROID_HOME }}
+
+      - name: Boot emulator
+        run: |
+          $ANDROID_HOME/emulator/emulator -avd test -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect &
+          adb wait-for-device
+          timeout 300 bash -c 'until adb shell getprop sys.boot_completed | grep -q 1; do sleep 5; done'
+          echo "emulator booted"
+
+      - name: Install APK
+        run: adb install -r apk/*.apk
+
+      - name: Push local runtime assets
+        run: |
+          adb shell mkdir -p /sdcard/Android/data/com.deepseek.harness/files
+          adb push assets/node-x86_64.tar.xz /sdcard/Android/data/com.deepseek.harness/files/node-x86_64.tar.xz
+          adb push assets/runtime.tar.xz /sdcard/Android/data/com.deepseek.harness/files/runtime.tar.xz
+          adb shell ls -la /sdcard/Android/data/com.deepseek.harness/files/
+
+      - name: Launch app
+        run: |
+          adb shell am start -n com.deepseek.harness/.MainActivity
+          sleep 90
+
+      - name: Assert node extracted
+        run: |
+          adb shell "run-as com.deepseek.harness ls -la files/node/bin/"
+          adb shell "run-as com.deepseek.harness ls files/node/bin/node" || (echo "NODE BINARY MISSING" && adb logcat -d | tail -200 && exit 1)
+          echo "node binary present"
+
+      - name: Assert runtime extracted
+        run: |
+          adb shell "run-as com.deepseek.harness ls files/dsh-home/runtime/node_modules/@deepseek-ai/dsh-desktop-host/lib/index.js" || (echo "HOST ENTRY MISSING" && exit 1)
+          echo "host entry present"
+
+      - name: Assert server responding
+        run: |
+          adb shell "run-as com.deepseek.harness sh -c 'echo GET / HTTP/1.0 | nc 127.0.0.1 19387 2>/dev/null | head -5'" || true
+          adb shell "toybox wget -q -O - http://127.0.0.1:19387/ 2>&1 | head -20" || true
+          HTTP=$(adb shell "toybox wget -q -O - http://127.0.0.1:19387/ 2>/dev/null | head -c 200")
+          echo "RESPONSE: $HTTP"
+          echo "$HTTP" | grep -qi "html\|deepseek\|harness\|<div\|<script" && echo "SERVER OK" || (echo "SERVER NOT RESPONDING" && adb logcat -d | tail -200 && exit 1)
+
+      - name: Dump logs
+        if: always()
+        run: adb logcat -d > full_logcat.txt
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: emulator-logs
+          path: full_logcat.txt
+
+  release:
+    needs: [build-apk, emulator-test]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: dsh-apk
+          path: ./apk
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: runtime-assets
+          path: ./assets
 
       - name: Delete existing release
-        if: startsWith(github.ref, 'refs/tags/')
-        run: |
-          gh release delete ${{ github.ref_name }} --yes --cleanup-tag || true
+        run: gh release delete ${{ github.ref_name }} --yes --cleanup-tag || true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
           name: ${{ github.ref_name }}
           files: |
-            release-assets/runtime-arm64.tar.xz
-            release-assets/node-arm64.tar.xz
-            app/build/outputs/apk/**/*.apk
+            assets/runtime.tar.xz
+            assets/node-arm64.tar.xz
+            assets/node-x86_64.tar.xz
+            apk/*.apk
           draft: false
           prerelease: true
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

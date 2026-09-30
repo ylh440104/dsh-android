@@ -2,11 +2,12 @@ package com.deepseek.harness;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.os.Build;
+import java.io.BufferedInputStream;
+import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
-import java.io.OutputStream;
-import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
@@ -14,14 +15,14 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import org.tukaani.xz.XZInputStream;
 
 public class NodeLauncher {
     private final Context context;
     private Process process;
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
-    private static final String RUNTIME_VERSION = "0.2.0-rc.1";
-    private static final String RUNTIME_URL = "https://github.com/ylh440104/dsh-android/releases/download/v0.2.0-rc.1/runtime-arm64.tar.xz";
-    private static final String NODE_URL = "https://github.com/ylh440104/dsh-android/releases/download/v0.2.0-rc.1/node-arm64.tar.xz";
+    private static final String RUNTIME_VERSION = "0.2.0-rc.2";
+    private static final String BASE_URL = "https://github.com/ylh440104/dsh-android/releases/download/v0.2.0-rc.2/";
 
     public interface Callback {
         void onReady(String url);
@@ -34,6 +35,14 @@ public class NodeLauncher {
         this.context = context;
     }
 
+    private static String abiTag() {
+        for (String abi : Build.SUPPORTED_ABIS) {
+            if (abi.equals("arm64-v8a")) return "arm64";
+            if (abi.equals("x86_64")) return "x86_64";
+        }
+        return "arm64";
+    }
+
     public void start(final Callback callback) {
         executor.execute(() -> {
             try {
@@ -41,30 +50,27 @@ public class NodeLauncher {
                 File homeDir = new File(filesDir, "dsh-home");
                 if (!homeDir.exists()) homeDir.mkdirs();
 
+                String abi = abiTag();
+                String stamp = RUNTIME_VERSION + "-" + abi;
+
                 File nodeDir = new File(filesDir, "node");
                 File nodeBin = new File(nodeDir, "bin/node");
-                File nodeLib = new File(nodeDir, "lib");
                 File runtimeDir = new File(homeDir, "runtime");
 
                 SharedPreferences prefs = context.getSharedPreferences("dsh", Context.MODE_PRIVATE);
-                String installedVer = prefs.getString("version", "");
-
-                if (!installedVer.equals(RUNTIME_VERSION) || !nodeBin.exists() || !runtimeDir.exists()) {
-                    prefs.edit().putBoolean("installed", false).apply();
-                }
-
                 boolean installed = prefs.getBoolean("installed", false);
+                String installedStamp = prefs.getString("stamp", "");
 
-                if (!installed || !nodeBin.exists() || !runtimeDir.exists()) {
-                    callback.onProgress("Downloading Node.js...");
+                if (!installed || !stamp.equals(installedStamp) || !nodeBin.exists() || !runtimeDir.exists()) {
+                    callback.onProgress("Downloading Node.js (" + abi + ")...");
                     deleteRecursive(nodeDir);
-                    downloadAndExtract(NODE_URL, nodeDir, callback);
+                    downloadAndExtract(BASE_URL + "node-" + abi + ".tar.xz", "node-" + abi + ".tar.xz", nodeDir, callback);
 
                     callback.onProgress("Downloading Harness runtime...");
                     deleteRecursive(runtimeDir);
-                    downloadAndExtract(RUNTIME_URL, homeDir, callback);
+                    downloadAndExtract(BASE_URL + "runtime.tar.xz", "runtime.tar.xz", homeDir, callback);
 
-                    prefs.edit().putBoolean("installed", true).putString("version", RUNTIME_VERSION).apply();
+                    prefs.edit().putBoolean("installed", true).putString("stamp", stamp).apply();
                 }
 
                 if (!nodeBin.exists()) {
@@ -76,8 +82,7 @@ public class NodeLauncher {
                 setupProfile(homeDir);
 
                 String nodeBinPath = nodeDir.getAbsolutePath() + "/bin";
-                String libPath = nodeLib.getAbsolutePath();
-                String ldLibPath = libPath + ":/system/lib64:/system/lib:/vendor/lib64:/vendor/lib";
+                String ldLibPath = nodeDir.getAbsolutePath() + "/lib:/system/lib64:/system/lib:/vendor/lib64:/vendor/lib";
 
                 callback.onProgress("Verifying node...");
                 ProcessBuilder testPb = new ProcessBuilder(nodeBin.getAbsolutePath(), "-v");
@@ -87,11 +92,9 @@ public class NodeLauncher {
                 testPb.environment().put("TMPDIR", context.getCacheDir().getAbsolutePath());
                 Process testProc = testPb.start();
                 BufferedReader testReader = new BufferedReader(new InputStreamReader(testProc.getInputStream()));
-                String testLine;
                 StringBuilder testOut = new StringBuilder();
-                while ((testLine = testReader.readLine()) != null) {
-                    testOut.append(testLine).append("\n");
-                }
+                String testLine;
+                while ((testLine = testReader.readLine()) != null) testOut.append(testLine).append("\n");
                 int testCode = testProc.waitFor();
                 if (testCode != 0) {
                     callback.onError("node test failed (code " + testCode + "): " + testOut.toString());
@@ -101,14 +104,14 @@ public class NodeLauncher {
 
                 callback.onProgress("Starting DeepSeek Harness...");
 
-                String primaryRuntime = new File(homeDir, "primary-runtime").getAbsolutePath();
-                String pnpmEntry = new File(runtimeDir, "pnpm/bin/pnpm.mjs").getAbsolutePath();
-
                 File entryFile = new File(runtimeDir, "node_modules/@deepseek-ai/dsh-desktop-host/lib/index.js");
                 if (!entryFile.exists()) {
                     callback.onError("host entry not found: " + entryFile.getAbsolutePath());
                     return;
                 }
+
+                String primaryRuntime = new File(homeDir, "primary-runtime").getAbsolutePath();
+                String pnpmEntry = new File(runtimeDir, "pnpm/bin/pnpm.mjs").getAbsolutePath();
 
                 ProcessBuilder pb = new ProcessBuilder(
                     nodeBin.getAbsolutePath(),
@@ -120,25 +123,22 @@ public class NodeLauncher {
                     pnpmEntry,
                     nodeBinPath
                 );
-
                 pb.directory(new File(homeDir, "profiles/desktop"));
                 pb.redirectErrorStream(true);
-
                 pb.environment().put("DSH_HOME", homeDir.getAbsolutePath());
-                pb.environment().put("DSH_CLIENT_VERSION", RUNTIME_VERSION);
+                pb.environment().put("DSH_CLIENT_VERSION", "0.2.0-rc.1");
                 pb.environment().put("DSH_DESKTOP_NODE_EXECUTABLE", nodeBin.getAbsolutePath());
                 pb.environment().put("HOME", filesDir.getAbsolutePath());
                 pb.environment().put("PATH", nodeBinPath + ":/system/bin:/vendor/bin");
                 pb.environment().put("TMPDIR", context.getCacheDir().getAbsolutePath());
                 pb.environment().put("LD_LIBRARY_PATH", ldLibPath);
-                pb.environment().put("NODE_OPTIONS", "--max-old-space-size=512");
+                pb.environment().put("NODE_OPTIONS", "--max-old-space-size=1024");
 
                 process = pb.start();
 
                 BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
                 String line;
                 Pattern urlPattern = Pattern.compile("https?://127\\.0\\.0\\.1:\\d+");
-
                 long startTime = System.currentTimeMillis();
                 long timeout = 180000;
 
@@ -157,36 +157,11 @@ public class NodeLauncher {
                 }
 
                 int exitCode = process.waitFor();
-                if (exitCode != 0) {
-                    callback.onError("Process exited with code " + exitCode);
-                } else {
-                    checkServerReady(callback);
-                }
-            } catch (Exception e) {
+                callback.onError("Process exited with code " + exitCode);
+            } catch (Throwable e) {
                 callback.onError(e.getMessage() != null ? e.getMessage() : e.toString());
             }
         });
-    }
-
-    private void checkServerReady(Callback callback) {
-        new Thread(() -> {
-            for (int i = 0; i < 30; i++) {
-                try {
-                    Thread.sleep(1000);
-                    HttpURLConnection conn = (HttpURLConnection) new URL("http://127.0.0.1:19387").openConnection();
-                    conn.setConnectTimeout(2000);
-                    conn.setReadTimeout(2000);
-                    conn.setRequestMethod("HEAD");
-                    int code = conn.getResponseCode();
-                    if (code > 0) {
-                        callback.onReady("http://127.0.0.1:19387");
-                        return;
-                    }
-                } catch (Exception e) {
-                }
-            }
-            callback.onError("Server did not become ready");
-        }).start();
     }
 
     private void setupProfile(File homeDir) throws Exception {
@@ -200,9 +175,7 @@ public class NodeLauncher {
             fos.close();
         }
         File patch = new File(profileDir, "cordis.patch.yml");
-        if (!patch.exists()) {
-            patch.createNewFile();
-        }
+        if (!patch.exists()) patch.createNewFile();
     }
 
     public void stop() {
@@ -216,20 +189,27 @@ public class NodeLauncher {
     private void deleteRecursive(File f) {
         if (f.isDirectory()) {
             File[] children = f.listFiles();
-            if (children != null) {
-                for (File c : children) deleteRecursive(c);
-            }
+            if (children != null) for (File c : children) deleteRecursive(c);
         }
         f.delete();
     }
 
-    private void downloadAndExtract(String url, File destDir, Callback callback) throws Exception {
+    private void downloadAndExtract(String url, String localName, File destDir, Callback callback) throws Exception {
         File archive = new File(context.getCacheDir(), "download.tar.xz");
+        if (archive.exists()) archive.delete();
         if (!destDir.exists()) destDir.mkdirs();
+
+        File local = new File(context.getExternalFilesDir(null), localName);
+        if (local.exists() && local.length() > 0) {
+            callback.onProgress("Using local " + localName + "...");
+            copyFile(local, archive);
+            extractArchive(archive, destDir, callback);
+            return;
+        }
 
         HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
         conn.setConnectTimeout(30000);
-        conn.setReadTimeout(300000);
+        conn.setReadTimeout(600000);
         conn.setRequestProperty("User-Agent", "DeepSeekHarness/0.2.0");
         conn.setInstanceFollowRedirects(true);
 
@@ -242,23 +222,37 @@ public class NodeLauncher {
         while ((len = is.read(buf)) > 0) {
             fos.write(buf, 0, len);
             downloaded += len;
-            if (totalSize > 0) {
-                int pct = downloaded * 100 / totalSize;
-                callback.onProgress("Downloading... " + pct + "%");
-            }
+            if (totalSize > 0) callback.onProgress("Downloading... " + (downloaded * 100 / totalSize) + "%");
         }
         fos.close();
         is.close();
         conn.disconnect();
 
+        if (archive.length() == 0) throw new RuntimeException("download failed, empty file: " + url);
+        extractArchive(archive, destDir, callback);
+    }
+
+    private void extractArchive(File archive, File destDir, Callback callback) throws Exception {
         callback.onProgress("Extracting...");
-        ProcessBuilder pb = new ProcessBuilder("/system/bin/tar", "-xf", archive.getAbsolutePath(), "-C", destDir.getAbsolutePath());
-        pb.redirectErrorStream(true);
-        Process p = pb.start();
-        BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream()));
-        while (reader.readLine() != null) {}
-        int code = p.waitFor();
+        InputStream xz = new XZInputStream(new BufferedInputStream(new java.io.FileInputStream(archive), 65536));
+        try {
+            Tar.extract(xz, destDir);
+        } finally {
+            xz.close();
+        }
         archive.delete();
-        if (code != 0) throw new RuntimeException("Extraction failed with code " + code);
+    }
+
+    private void copyFile(File src, File dst) throws Exception {
+        java.io.FileInputStream in = new java.io.FileInputStream(src);
+        FileOutputStream out = new FileOutputStream(dst);
+        try {
+            byte[] buf = new byte[65536];
+            int n;
+            while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+        } finally {
+            try { in.close(); } catch (Exception e) {}
+            try { out.close(); } catch (Exception e) {}
+        }
     }
 }

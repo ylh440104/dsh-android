@@ -69,12 +69,32 @@ jobs:
           cd out/node-x86_64 && tar -cf ../../node-x86_64.tar . && cd ../..
           xz -9 -T 0 node-x86_64.tar
 
+      - name: Fetch linux native addons from npm
+        run: |
+          mkdir -p nat
+          cd nat
+          for pkg in node-addon-require-builtin-linux-arm64-gnu node-addon-require-builtin-linux-x64-gnu; do
+            ver=$(curl -s "https://registry.npmjs.org/$pkg" | python3 -c "import json,sys; print(json.load(sys.stdin)['dist-tags']['latest'])")
+            url="https://registry.npmjs.org/$pkg/-/$pkg-$ver.tgz"
+            echo "fetch $pkg@$ver"
+            curl -sL "$url" -o "$pkg.tgz"
+            mkdir -p "$pkg"
+            tar xzf "$pkg.tgz" -C "$pkg" --strip-components=1
+          done
+          ls -R .
+          cd ..
+
       - name: Package runtime
         run: |
           mkdir -p out/runtime
           cp -r asar_extract/dsh/* out/runtime/
           cp -rn asar_extract/app.asar.unpacked/dsh/node_modules/* out/runtime/node_modules/ 2>/dev/null || true
           cp -r asar_extract/runtime/* out/runtime/
+          cp -r nat/node-addon-require-builtin-linux-arm64-gnu out/runtime/node_modules/ 2>/dev/null || true
+          cp -r nat/node-addon-require-builtin-linux-x64-gnu out/runtime/node_modules/ 2>/dev/null || true
+          echo "=== native addons in runtime ==="
+          ls out/runtime/node_modules/ | grep node-addon || true
+          find out/runtime/node_modules/node-addon-require-builtin-linux-arm64-gnu -name '*.node' 2>/dev/null || true
           cd out/runtime && tar -cf ../../runtime.tar . && cd ../..
           xz -9 -T 0 runtime.tar
 

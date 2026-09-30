@@ -175,7 +175,15 @@ public class NodeLauncher {
             fos.close();
         }
         File patch = new File(profileDir, "cordis.patch.yml");
-        if (!patch.exists()) patch.createNewFile();
+        if (!patch.exists()) {
+            FileOutputStream fos = new FileOutputStream(patch);
+            fos.write("[]\n".getBytes());
+            fos.close();
+        } else if (patch.length() == 0) {
+            FileOutputStream fos = new FileOutputStream(patch);
+            fos.write("[]\n".getBytes());
+            fos.close();
+        }
     }
 
     public void stop() {

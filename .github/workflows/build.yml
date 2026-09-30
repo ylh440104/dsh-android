@@ -22,22 +22,17 @@ jobs:
           node-version: '22'
 
       - name: Install tools
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y p7zip-full xz-utils ar
+        run: sudo apt-get install -y p7zip-full xz-utils
 
       - name: Download original Windows installer
-        run: |
-          curl -L -o dsh-installer.exe "https://download.deepseek.com/dsh-desk/bin/win-x64/deepseek-harness-0.2.0-rc.1-win-x64.exe"
+        run: curl -L -o dsh-installer.exe "https://download.deepseek.com/dsh-desk/bin/win-x64/deepseek-harness-0.2.0-rc.1-win-x64.exe"
 
       - name: Extract NSIS installer
         run: |
-          mkdir -p nsis_extract
-          cd nsis_extract
+          mkdir -p nsis_extract && cd nsis_extract
           7z x ../dsh-installer.exe -y
-          mkdir -p app_extract
-          cd app_extract
-          7z x "../\$PLUGINSDIR/app-64.7z" -y
+          mkdir -p app_extract && cd app_extract
+          7z x '../$PLUGINSDIR/app-64.7z' -y
 
       - name: Extract app.asar
         run: |
@@ -48,11 +43,9 @@ jobs:
 
       - name: Download Termux Node.js 22 arm64
         run: |
-          mkdir -p node_extract
           curl -L -o node-pkg.deb "https://github.com/termux/termux-nodejs-distro/releases/download/v22.14.0/nodejs-22.14.0_aarch64.deb"
-          cd node_extract
-          ar x ../node-pkg.deb
-          tar xf data.tar.*
+          mkdir -p node_extract
+          dpkg-deb -x node-pkg.deb node_extract
 
       - name: Package runtime tarball
         run: |
@@ -60,17 +53,10 @@ jobs:
           cp -r asar_extract/dsh/* runtime-pkg/runtime/
           cp -rn asar_extract/app.asar.unpacked/dsh/node_modules/* runtime-pkg/runtime/node_modules/
           cp -r asar_extract/runtime/* runtime-pkg/
-
           mkdir -p node-pkg
           cp -r node_extract/data/data/com.termux/files/usr/* node-pkg/
-
-          cd runtime-pkg
-          tar -cf ../runtime-arm64.tar .
-          xz -9 -T 0 ../runtime-arm64.tar
-
-          cd ../node-pkg
-          tar -cf ../node-arm64.tar .
-          xz -9 -T 0 ../node-arm64.tar
+          cd runtime-pkg && tar -cf ../runtime-arm64.tar . && xz -9 -T 0 ../runtime-arm64.tar
+          cd ../node-pkg && tar -cf ../node-arm64.tar . && xz -9 -T 0 ../node-arm64.tar
 
       - name: Upload runtime artifacts
         uses: actions/upload-artifact@v4
@@ -101,7 +87,7 @@ jobs:
         uses: gradle/actions/setup-gradle@v3
 
       - name: Build debug APK
-        run: gradle assembleDebug --no-daemon --stacktrace
+        run: gradle assembleDebug --no-daemon --stacktrace --no-build-cache
 
       - name: Upload APK
         uses: actions/upload-artifact@v4

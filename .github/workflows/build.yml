@@ -46,6 +46,7 @@ jobs:
           curl -L -o node-pkg.deb "https://packages.termux.dev/apt/termux-main/pool/main/n/nodejs/nodejs_26.4.0-1_aarch64.deb"
           mkdir -p node_extract
           dpkg-deb -x node-pkg.deb node_extract
+          sudo apt-get install -y patchelf
 
       - name: Package runtime tarball
         run: |
@@ -55,6 +56,8 @@ jobs:
           cp -r asar_extract/runtime/* runtime-pkg/
           mkdir -p node-pkg
           cp -r node_extract/data/data/com.termux/files/usr/* node-pkg/
+          patchelf --set-interpreter /system/bin/linker64 node-pkg/bin/node || true
+          patchelf --set-rpath '$ORIGIN/../lib' node-pkg/bin/node || true
           cd runtime-pkg && tar -cf ../runtime-arm64.tar . && xz -9 -T 0 ../runtime-arm64.tar
           cd ../node-pkg && tar -cf ../node-arm64.tar . && xz -9 -T 0 ../node-arm64.tar
 

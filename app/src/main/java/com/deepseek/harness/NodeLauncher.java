@@ -37,65 +37,111 @@ public class NodeLauncher {
     public void start(final Callback callback) {
         executor.execute(() -> {
             try {
-                File homeDir = new File(context.getFilesDir(), "dsh-home");
+                File filesDir = context.getFilesDir();
+                File homeDir = new File(filesDir, "dsh-home");
                 if (!homeDir.exists()) homeDir.mkdirs();
-                
-                File nodeDir = new File(context.getFilesDir(), "node");
+
+                File nodeDir = new File(filesDir, "node");
                 File nodeBin = new File(nodeDir, "bin/node");
+                File nodeLib = new File(nodeDir, "lib");
                 File runtimeDir = new File(homeDir, "runtime");
-                
+
                 SharedPreferences prefs = context.getSharedPreferences("dsh", Context.MODE_PRIVATE);
-                boolean installed = prefs.getBoolean("installed", false);
-                
-                if (!installed || !nodeBin.exists() || !runtimeDir.exists()) {
-                    callback.onProgress("Downloading Node.js runtime...");
-                    downloadAndExtract(NODE_URL, nodeDir, callback);
-                    
-                    callback.onProgress("Downloading DeepSeek Harness runtime...");
-                    downloadAndExtract(RUNTIME_URL, homeDir, callback);
-                    
-                    prefs.edit().putBoolean("installed", true).apply();
+                String installedVer = prefs.getString("version", "");
+
+                if (!installedVer.equals(RUNTIME_VERSION) || !nodeBin.exists() || !runtimeDir.exists()) {
+                    prefs.edit().putBoolean("installed", false).apply();
                 }
-                
+
+                boolean installed = prefs.getBoolean("installed", false);
+
+                if (!installed || !nodeBin.exists() || !runtimeDir.exists()) {
+                    callback.onProgress("Downloading Node.js...");
+                    deleteRecursive(nodeDir);
+                    downloadAndExtract(NODE_URL, nodeDir, callback);
+
+                    callback.onProgress("Downloading Harness runtime...");
+                    deleteRecursive(runtimeDir);
+                    downloadAndExtract(RUNTIME_URL, homeDir, callback);
+
+                    prefs.edit().putBoolean("installed", true).putString("version", RUNTIME_VERSION).apply();
+                }
+
+                if (!nodeBin.exists()) {
+                    callback.onError("node binary not found at " + nodeBin.getAbsolutePath());
+                    return;
+                }
                 nodeBin.setExecutable(true, true);
+
                 setupProfile(homeDir);
-                
+
+                String nodeBinPath = nodeDir.getAbsolutePath() + "/bin";
+                String libPath = nodeLib.getAbsolutePath();
+                String ldLibPath = libPath + ":/system/lib64:/system/lib:/vendor/lib64:/vendor/lib";
+
+                callback.onProgress("Verifying node...");
+                ProcessBuilder testPb = new ProcessBuilder(nodeBin.getAbsolutePath(), "-v");
+                testPb.redirectErrorStream(true);
+                testPb.environment().put("LD_LIBRARY_PATH", ldLibPath);
+                testPb.environment().put("HOME", filesDir.getAbsolutePath());
+                testPb.environment().put("TMPDIR", context.getCacheDir().getAbsolutePath());
+                Process testProc = testPb.start();
+                BufferedReader testReader = new BufferedReader(new InputStreamReader(testProc.getInputStream()));
+                String testLine;
+                StringBuilder testOut = new StringBuilder();
+                while ((testLine = testReader.readLine()) != null) {
+                    testOut.append(testLine).append("\n");
+                }
+                int testCode = testProc.waitFor();
+                if (testCode != 0) {
+                    callback.onError("node test failed (code " + testCode + "): " + testOut.toString());
+                    return;
+                }
+                callback.onLog("node version: " + testOut.toString().trim());
+
                 callback.onProgress("Starting DeepSeek Harness...");
-                
+
                 String primaryRuntime = new File(homeDir, "primary-runtime").getAbsolutePath();
                 String pnpmEntry = new File(runtimeDir, "pnpm/bin/pnpm.mjs").getAbsolutePath();
-                String nodeBinPath = nodeDir.getAbsolutePath() + "/bin";
-                
+
+                File entryFile = new File(runtimeDir, "node_modules/@deepseek-ai/dsh-desktop-host/lib/index.js");
+                if (!entryFile.exists()) {
+                    callback.onError("host entry not found: " + entryFile.getAbsolutePath());
+                    return;
+                }
+
                 ProcessBuilder pb = new ProcessBuilder(
                     nodeBin.getAbsolutePath(),
                     "--expose-internals",
-                    new File(runtimeDir, "node_modules/@deepseek-ai/dsh-desktop-host/lib/index.js").getAbsolutePath(),
+                    entryFile.getAbsolutePath(),
                     runtimeDir.getAbsolutePath(),
                     new File(homeDir, "profiles/desktop").getAbsolutePath(),
                     primaryRuntime,
                     pnpmEntry,
                     nodeBinPath
                 );
-                
+
                 pb.directory(new File(homeDir, "profiles/desktop"));
                 pb.redirectErrorStream(true);
-                
+
                 pb.environment().put("DSH_HOME", homeDir.getAbsolutePath());
                 pb.environment().put("DSH_CLIENT_VERSION", RUNTIME_VERSION);
                 pb.environment().put("DSH_DESKTOP_NODE_EXECUTABLE", nodeBin.getAbsolutePath());
-                pb.environment().put("HOME", context.getFilesDir().getAbsolutePath());
+                pb.environment().put("HOME", filesDir.getAbsolutePath());
                 pb.environment().put("PATH", nodeBinPath + ":/system/bin:/vendor/bin");
                 pb.environment().put("TMPDIR", context.getCacheDir().getAbsolutePath());
-                
+                pb.environment().put("LD_LIBRARY_PATH", ldLibPath);
+                pb.environment().put("NODE_OPTIONS", "--max-old-space-size=512");
+
                 process = pb.start();
-                
+
                 BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
                 String line;
                 Pattern urlPattern = Pattern.compile("https?://127\\.0\\.0\\.1:\\d+");
-                
+
                 long startTime = System.currentTimeMillis();
-                long timeout = 120000;
-                
+                long timeout = 180000;
+
                 while ((line = reader.readLine()) != null) {
                     callback.onLog(line);
                     Matcher m = urlPattern.matcher(line);
@@ -109,7 +155,7 @@ public class NodeLauncher {
                         return;
                     }
                 }
-                
+
                 int exitCode = process.waitFor();
                 if (exitCode != 0) {
                     callback.onError("Process exited with code " + exitCode);
@@ -121,7 +167,7 @@ public class NodeLauncher {
             }
         });
     }
-    
+
     private void checkServerReady(Callback callback) {
         new Thread(() -> {
             for (int i = 0; i < 30; i++) {
@@ -142,7 +188,7 @@ public class NodeLauncher {
             callback.onError("Server did not become ready");
         }).start();
     }
-    
+
     private void setupProfile(File homeDir) throws Exception {
         File profileDir = new File(homeDir, "profiles/desktop");
         if (!profileDir.exists()) profileDir.mkdirs();
@@ -158,7 +204,7 @@ public class NodeLauncher {
             patch.createNewFile();
         }
     }
-    
+
     public void stop() {
         if (process != null) {
             process.destroy();
@@ -166,16 +212,27 @@ public class NodeLauncher {
         }
         executor.shutdownNow();
     }
-    
+
+    private void deleteRecursive(File f) {
+        if (f.isDirectory()) {
+            File[] children = f.listFiles();
+            if (children != null) {
+                for (File c : children) deleteRecursive(c);
+            }
+        }
+        f.delete();
+    }
+
     private void downloadAndExtract(String url, File destDir, Callback callback) throws Exception {
         File archive = new File(context.getCacheDir(), "download.tar.xz");
         if (!destDir.exists()) destDir.mkdirs();
-        
+
         HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
         conn.setConnectTimeout(30000);
         conn.setReadTimeout(300000);
         conn.setRequestProperty("User-Agent", "DeepSeekHarness/0.2.0");
-        
+        conn.setInstanceFollowRedirects(true);
+
         int totalSize = conn.getContentLength();
         InputStream is = conn.getInputStream();
         FileOutputStream fos = new FileOutputStream(archive);
@@ -193,7 +250,7 @@ public class NodeLauncher {
         fos.close();
         is.close();
         conn.disconnect();
-        
+
         callback.onProgress("Extracting...");
         ProcessBuilder pb = new ProcessBuilder("/system/bin/tar", "-xf", archive.getAbsolutePath(), "-C", destDir.getAbsolutePath());
         pb.redirectErrorStream(true);

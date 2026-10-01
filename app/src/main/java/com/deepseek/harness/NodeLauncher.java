@@ -21,8 +21,8 @@ public class NodeLauncher {
     private final Context context;
     private Process process;
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
-    private static final String RUNTIME_VERSION = "0.2.0-rc.5";
-    private static final String BASE_URL = "https://github.com/ylh440104/dsh-android/releases/download/v0.2.0-rc.5/";
+    private static final String RUNTIME_VERSION = "0.2.0-rc.6";
+    private static final String BASE_URL = "https://github.com/ylh440104/dsh-android/releases/download/v0.2.0-rc.6/";
 
     public interface Callback {
         void onReady(String url);
@@ -46,7 +46,8 @@ public class NodeLauncher {
     public void start(final Callback callback) {
         executor.execute(() -> {
             try {
-                File filesDir = context.getFilesDir();
+                File filesDir = context.getExternalFilesDir(null);
+                if (filesDir == null) filesDir = context.getFilesDir();
                 File homeDir = new File(filesDir, "dsh-home");
                 if (!homeDir.exists()) homeDir.mkdirs();
 

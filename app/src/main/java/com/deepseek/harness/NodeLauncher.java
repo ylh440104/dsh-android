@@ -21,8 +21,8 @@ public class NodeLauncher {
     private final Context context;
     private Process process;
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
-    private static final String RUNTIME_VERSION = "0.2.0-rc.11";
-    private static final String BASE_URL = "https://github.com/ylh440104/dsh-android/releases/download/v0.2.0-rc.11/";
+    private static final String RUNTIME_VERSION = "0.2.0-rc.12";
+    private static final String BASE_URL = "https://github.com/ylh440104/dsh-android/releases/download/v0.2.0-rc.12/";
 
     public interface Callback {
         void onReady(String url);
@@ -97,24 +97,6 @@ public class NodeLauncher {
                 String nodeBinPath = nodeDir.getAbsolutePath() + "/bin";
                 File homeDir2 = homeDir;
                 String ldLibPath = nodeDir.getAbsolutePath() + "/lib:/system/lib64:/system/lib:/vendor/lib64:/vendor/lib";
-
-                callback.onProgress("Verifying node...");
-                ProcessBuilder testPb = new ProcessBuilder("/system/bin/sh", "-c", nodeBin.getAbsolutePath() + " -v");
-                testPb.redirectErrorStream(true);
-                testPb.environment().put("LD_LIBRARY_PATH", ldLibPath);
-                testPb.environment().put("HOME", homeDir.getAbsolutePath());
-                testPb.environment().put("TMPDIR", context.getCacheDir().getAbsolutePath());
-                Process testProc = testPb.start();
-                BufferedReader testReader = new BufferedReader(new InputStreamReader(testProc.getInputStream()));
-                StringBuilder testOut = new StringBuilder();
-                String testLine;
-                while ((testLine = testReader.readLine()) != null) testOut.append(testLine).append("\n");
-                int testCode = testProc.waitFor();
-                if (testCode != 0) {
-                    callback.onError("node test failed (code " + testCode + "): " + testOut.toString());
-                    return;
-                }
-                callback.onLog("node version: " + testOut.toString().trim());
 
                 callback.onProgress("Starting DeepSeek Harness...");
 

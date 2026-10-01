@@ -292,11 +292,11 @@ jobs:
         run: |
           cd home/profiles/desktop
           export DSH_HOME=$PWD/../..
-          nohup $GITHUB_WORKSPACE/nodehome/bin/node --expose-internals \
+          nohup sh -c 'exec $GITHUB_WORKSPACE/nodehome/bin/node --expose-internals \
             $GITHUB_WORKSPACE/home/node_modules/@deepseek-ai/dsh-desktop-host/lib/index.js \
             $GITHUB_WORKSPACE/home \
             $GITHUB_WORKSPACE/home/profiles/desktop \
-            $GITHUB_WORKSPACE/home/primary-runtime > $GITHUB_WORKSPACE/host.log 2>&1 &
+            $GITHUB_WORKSPACE/home/primary-runtime' > $GITHUB_WORKSPACE/host.log 2>&1 &
           echo "waiting for host..."
           for i in $(seq 1 60); do
             if grep -q "dsh web: http" $GITHUB_WORKSPACE/host.log 2>/dev/null; then

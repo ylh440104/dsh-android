@@ -21,8 +21,8 @@ public class NodeLauncher {
     private final Context context;
     private Process process;
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
-    private static final String RUNTIME_VERSION = "0.2.0-rc.9";
-    private static final String BASE_URL = "https://github.com/ylh440104/dsh-android/releases/download/v0.2.0-rc.9/";
+    private static final String RUNTIME_VERSION = "0.2.0-rc.11";
+    private static final String BASE_URL = "https://github.com/ylh440104/dsh-android/releases/download/v0.2.0-rc.11/";
 
     public interface Callback {
         void onReady(String url);
@@ -132,7 +132,7 @@ public class NodeLauncher {
                     nodeBin.getAbsolutePath() + " --expose-internals " +
                     entryFile.getAbsolutePath() + " " +
                     runtimeDir.getAbsolutePath() + " " +
-                    """ + new File(homeDir, "profiles/desktop").getAbsolutePath() + "" " +
+                    new File(homeDir, "profiles/desktop").getAbsolutePath() + " " +
                     primaryRuntime + " " +
                     pnpmEntry + " " +
                     nodeBinPath

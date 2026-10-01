@@ -21,8 +21,8 @@ public class NodeLauncher {
     private final Context context;
     private Process process;
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
-    private static final String RUNTIME_VERSION = "0.2.0-rc.7";
-    private static final String BASE_URL = "https://github.com/ylh440104/dsh-android/releases/download/v0.2.0-rc.7/";
+    private static final String RUNTIME_VERSION = "0.2.0-rc.8";
+    private static final String BASE_URL = "https://github.com/ylh440104/dsh-android/releases/download/v0.2.0-rc.8/";
 
     public interface Callback {
         void onReady(String url);
@@ -46,15 +46,17 @@ public class NodeLauncher {
     public void start(final Callback callback) {
         executor.execute(() -> {
             try {
-                File filesDir = context.getExternalFilesDir(null);
-                if (filesDir == null) filesDir = context.getFilesDir();
-                File homeDir = new File(filesDir, "dsh-home");
+                File homeDir = new File(context.getExternalFilesDir(null), "dsh-home");
+                if (homeDir == null) homeDir = new File(context.getFilesDir(), "dsh-home");
                 if (!homeDir.exists()) homeDir.mkdirs();
+                File codeCache = new File(context.getExternalFilesDir(null), "code_cache");
+                if (codeCache == null) codeCache = new File(context.getFilesDir(), "code_cache");
+                if (!codeCache.exists()) codeCache.mkdirs();
 
                 String abi = abiTag();
                 String stamp = RUNTIME_VERSION + "-" + abi;
 
-                File nodeDir = new File(filesDir, "node");
+                File nodeDir = new File(codeCache, "node");
                 File nodeBin = new File(nodeDir, "bin/node");
                 File runtimeDir = new File(homeDir, "runtime");
 
@@ -84,7 +86,7 @@ public class NodeLauncher {
                     Runtime.getRuntime().exec(new String[]{"/system/bin/chmod", "755", nodeBin.getAbsolutePath()}).waitFor();
                 } catch (Exception ignored) {
                 }
-                if (!nodeBin.canExecute()) {
+                if (false) {
                     callback.onError("cannot make node executable: " + nodeBin.getAbsolutePath());
                     return;
                 }
@@ -97,7 +99,10 @@ public class NodeLauncher {
                 String ldLibPath = nodeDir.getAbsolutePath() + "/lib:/system/lib64:/system/lib:/vendor/lib64:/vendor/lib";
 
                 callback.onProgress("Verifying node...");
-                ProcessBuilder testPb = new ProcessBuilder(nodeBin.getAbsolutePath(), "-v");
+                String linker = "/system/bin/linker64";
+        File linkerFile = new File(linker);
+        if (!linkerFile.exists()) linker = "/system/bin/linker";
+        ProcessBuilder testPb = new ProcessBuilder(linker, "--library-path", nodeDir.getAbsolutePath() + "/lib", nodeBin.getAbsolutePath(), "-v");
                 testPb.redirectErrorStream(true);
                 testPb.environment().put("LD_LIBRARY_PATH", ldLibPath);
                 testPb.environment().put("HOME", homeDir.getAbsolutePath());
@@ -126,6 +131,8 @@ public class NodeLauncher {
                 String pnpmEntry = new File(runtimeDir, "pnpm/bin/pnpm.mjs").getAbsolutePath();
 
                 ProcessBuilder pb = new ProcessBuilder(
+                    linker,
+                    "--library-path", nodeDir.getAbsolutePath() + "/lib",
                     nodeBin.getAbsolutePath(),
                     "--expose-internals",
                     entryFile.getAbsolutePath(),

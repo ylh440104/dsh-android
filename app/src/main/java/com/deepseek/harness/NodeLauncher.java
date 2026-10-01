@@ -21,8 +21,8 @@ public class NodeLauncher {
     private final Context context;
     private Process process;
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
-    private static final String RUNTIME_VERSION = "0.2.0-rc.8";
-    private static final String BASE_URL = "https://github.com/ylh440104/dsh-android/releases/download/v0.2.0-rc.8/";
+    private static final String RUNTIME_VERSION = "0.2.0-rc.9";
+    private static final String BASE_URL = "https://github.com/ylh440104/dsh-android/releases/download/v0.2.0-rc.9/";
 
     public interface Callback {
         void onReady(String url);
@@ -99,10 +99,7 @@ public class NodeLauncher {
                 String ldLibPath = nodeDir.getAbsolutePath() + "/lib:/system/lib64:/system/lib:/vendor/lib64:/vendor/lib";
 
                 callback.onProgress("Verifying node...");
-                String linker = "/system/bin/linker64";
-        File linkerFile = new File(linker);
-        if (!linkerFile.exists()) linker = "/system/bin/linker";
-        ProcessBuilder testPb = new ProcessBuilder(linker, "--library-path", nodeDir.getAbsolutePath() + "/lib", nodeBin.getAbsolutePath(), "-v");
+                ProcessBuilder testPb = new ProcessBuilder("/system/bin/sh", "-c", nodeBin.getAbsolutePath() + " -v");
                 testPb.redirectErrorStream(true);
                 testPb.environment().put("LD_LIBRARY_PATH", ldLibPath);
                 testPb.environment().put("HOME", homeDir.getAbsolutePath());
@@ -131,15 +128,13 @@ public class NodeLauncher {
                 String pnpmEntry = new File(runtimeDir, "pnpm/bin/pnpm.mjs").getAbsolutePath();
 
                 ProcessBuilder pb = new ProcessBuilder(
-                    linker,
-                    "--library-path", nodeDir.getAbsolutePath() + "/lib",
-                    nodeBin.getAbsolutePath(),
-                    "--expose-internals",
-                    entryFile.getAbsolutePath(),
-                    runtimeDir.getAbsolutePath(),
-                    new File(homeDir, "profiles/desktop").getAbsolutePath(),
-                    primaryRuntime,
-                    pnpmEntry,
+                    "/system/bin/sh", "-c",
+                    nodeBin.getAbsolutePath() + " --expose-internals " +
+                    entryFile.getAbsolutePath() + " " +
+                    runtimeDir.getAbsolutePath() + " " +
+                    """ + new File(homeDir, "profiles/desktop").getAbsolutePath() + "" " +
+                    primaryRuntime + " " +
+                    pnpmEntry + " " +
                     nodeBinPath
                 );
                 pb.directory(new File(homeDir, "profiles/desktop"));

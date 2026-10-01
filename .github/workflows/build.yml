@@ -66,8 +66,8 @@ jobs:
           fetch node-x86 n/nodejs/nodejs_26.4.0-1_x86_64.deb
           fetch icu-arm64 libi/libicu/libicu_78.3_aarch64.deb
           fetch icu-x86 libi/libicu/libicu_78.3_x86_64.deb
-          fetch sqlite-arm64 s/sqlite/sqlite_3.53.4_aarch64.deb
-          fetch sqlite-x86 s/sqlite/sqlite_3.53.4_x86_64.deb
+          fetch sqlite-arm64 libs/libsqlite/libsqlite_3.53.4_aarch64.deb
+          fetch sqlite-x86 libs/libsqlite/libsqlite_3.53.4_x86_64.deb
           fetch cares-arm64 c/c-ares/c-ares_1.34.8_aarch64.deb
           fetch cares-x86 c/c-ares/c-ares_1.34.8_x86_64.deb
           cd ..

@@ -21,8 +21,8 @@ public class NodeLauncher {
     private final Context context;
     private Process process;
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
-    private static final String RUNTIME_VERSION = "0.2.0-rc.4";
-    private static final String BASE_URL = "https://github.com/ylh440104/dsh-android/releases/download/v0.2.0-rc.4/";
+    private static final String RUNTIME_VERSION = "0.2.0-rc.5";
+    private static final String BASE_URL = "https://github.com/ylh440104/dsh-android/releases/download/v0.2.0-rc.5/";
 
     public interface Callback {
         void onReady(String url);
@@ -77,7 +77,16 @@ public class NodeLauncher {
                     callback.onError("node binary not found at " + nodeBin.getAbsolutePath());
                     return;
                 }
-                nodeBin.setExecutable(true, true);
+                nodeBin.setExecutable(true, false);
+                nodeBin.setReadable(true, false);
+                try {
+                    Runtime.getRuntime().exec(new String[]{"/system/bin/chmod", "755", nodeBin.getAbsolutePath()}).waitFor();
+                } catch (Exception ignored) {
+                }
+                if (!nodeBin.canExecute()) {
+                    callback.onError("cannot make node executable: " + nodeBin.getAbsolutePath());
+                    return;
+                }
 
                 setupProfile(homeDir);
                 linkOfficeNode(homeDir, nodeBin);

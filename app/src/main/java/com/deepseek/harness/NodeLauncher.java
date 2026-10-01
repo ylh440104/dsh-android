@@ -21,8 +21,8 @@ public class NodeLauncher {
     private final Context context;
     private Process process;
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
-    private static final String RUNTIME_VERSION = "0.2.0-rc.6";
-    private static final String BASE_URL = "https://github.com/ylh440104/dsh-android/releases/download/v0.2.0-rc.6/";
+    private static final String RUNTIME_VERSION = "0.2.0-rc.7";
+    private static final String BASE_URL = "https://github.com/ylh440104/dsh-android/releases/download/v0.2.0-rc.7/";
 
     public interface Callback {
         void onReady(String url);
@@ -93,13 +93,14 @@ public class NodeLauncher {
                 linkOfficeNode(homeDir, nodeBin);
 
                 String nodeBinPath = nodeDir.getAbsolutePath() + "/bin";
+                File homeDir2 = homeDir;
                 String ldLibPath = nodeDir.getAbsolutePath() + "/lib:/system/lib64:/system/lib:/vendor/lib64:/vendor/lib";
 
                 callback.onProgress("Verifying node...");
                 ProcessBuilder testPb = new ProcessBuilder(nodeBin.getAbsolutePath(), "-v");
                 testPb.redirectErrorStream(true);
                 testPb.environment().put("LD_LIBRARY_PATH", ldLibPath);
-                testPb.environment().put("HOME", filesDir.getAbsolutePath());
+                testPb.environment().put("HOME", homeDir.getAbsolutePath());
                 testPb.environment().put("TMPDIR", context.getCacheDir().getAbsolutePath());
                 Process testProc = testPb.start();
                 BufferedReader testReader = new BufferedReader(new InputStreamReader(testProc.getInputStream()));
@@ -139,7 +140,7 @@ public class NodeLauncher {
                 pb.environment().put("DSH_HOME", homeDir.getAbsolutePath());
                 pb.environment().put("DSH_CLIENT_VERSION", "0.2.0-rc.1");
                 pb.environment().put("DSH_DESKTOP_NODE_EXECUTABLE", nodeBin.getAbsolutePath());
-                pb.environment().put("HOME", filesDir.getAbsolutePath());
+                pb.environment().put("HOME", homeDir.getAbsolutePath());
                 pb.environment().put("PATH", nodeBinPath + ":/system/bin:/vendor/bin");
                 pb.environment().put("TMPDIR", context.getCacheDir().getAbsolutePath());
                 pb.environment().put("LD_LIBRARY_PATH", ldLibPath);

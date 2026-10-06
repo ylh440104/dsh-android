@@ -23,10 +23,10 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Menu
-import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.Psychology
+import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -109,11 +109,11 @@ fun ChatScreen(
                     )
                     Spacer(Modifier.width(4.dp))
                     Icon(
-                        Icons.Default.MoreVert,
+                        Icons.Default.KeyboardArrowDown,
                         contentDescription = "切换模型",
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier
-                            .size(16.dp)
+                            .size(20.dp)
                             .clickableNoRipple { modelMenu = true }
                     )
                 }
@@ -142,7 +142,7 @@ fun ChatScreen(
             }
             IconButton(onClick = { overflowMenu = true }) {
                 Icon(
-                    Icons.Default.Psychology,
+                    Icons.Default.Settings,
                     contentDescription = "选项",
                     tint = if (showReasoning) MaterialTheme.colorScheme.primary
                     else MaterialTheme.colorScheme.onSurfaceVariant
@@ -249,7 +249,7 @@ private fun InputBar(
                     modifier = Modifier.clickableNoRipple(enabled) { onSend() }
                 ) {
                     Icon(
-                        Icons.Default.ArrowUpward,
+                        Icons.Default.Send,
                         contentDescription = "发送",
                         tint = if (enabled) MaterialTheme.colorScheme.onPrimary
                         else MaterialTheme.colorScheme.onSurfaceVariant,

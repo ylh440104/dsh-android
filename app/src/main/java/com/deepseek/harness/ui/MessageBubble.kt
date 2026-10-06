@@ -14,9 +14,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ExpandLess
-import androidx.compose.material.icons.filled.ExpandMore
-import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -111,7 +111,7 @@ private fun ReasoningBlock(text: String) {
                 )
                 Spacer(Modifier.width(4.dp))
                 Icon(
-                    if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(16.dp)
@@ -144,7 +144,7 @@ private fun ToolBubble(message: ChatMessage) {
                 modifier = Modifier.clickable { expanded = !expanded }
             ) {
                 Icon(
-                    Icons.Default.Terminal,
+                    Icons.Default.Build,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(15.dp)

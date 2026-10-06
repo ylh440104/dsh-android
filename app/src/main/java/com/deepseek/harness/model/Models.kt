@@ -31,8 +31,8 @@ data class ChatMessage(
 
 data class Conversation(
     val id: String,
-    val title: String,
-    val updatedAt: Long,
+    var title: String,
+    var updatedAt: Long,
     val messages: MutableList<ChatMessage> = mutableListOf()
 )
 

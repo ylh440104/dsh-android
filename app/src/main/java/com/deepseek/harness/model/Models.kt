@@ -26,7 +26,8 @@ data class ChatMessage(
     val reasoning: String = "",
     val toolName: String = "",
     val toolInput: String = "",
-    val isError: Boolean = false
+    val isError: Boolean = false,
+    val isRetrying: Boolean = false
 )
 
 data class Conversation(

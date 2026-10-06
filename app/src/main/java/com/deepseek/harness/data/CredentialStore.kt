@@ -63,6 +63,14 @@ class CredentialStore(context: Context) {
         return generated
     }
 
+    fun anonymousUserId(): String {
+        val existing = prefs.getString(KEY_ANON_USER, null)
+        if (existing != null) return existing
+        val generated = java.util.UUID.randomUUID().toString()
+        prefs.edit().putString(KEY_ANON_USER, generated).apply()
+        return generated
+    }
+
     fun saveModel(model: String) {
         prefs.edit().putString(KEY_MODEL, model).apply()
     }
@@ -75,6 +83,7 @@ class CredentialStore(context: Context) {
         private const val TRANSFORM = "AES/GCM/NoPadding"
         private const val KEY_TOKEN = "token"
         private const val KEY_DEVICE = "device_id"
+        private const val KEY_ANON_USER = "anon_user_id"
         private const val KEY_MODEL = "model"
     }
 }

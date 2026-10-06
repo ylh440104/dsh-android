@@ -14,6 +14,7 @@ sealed class StreamEvent {
     data class Reasoning(val delta: String) : StreamEvent()
     data class ToolUse(val id: String, val name: String, val input: String) : StreamEvent()
     data class Usage(val inputTokens: Int, val outputTokens: Int) : StreamEvent()
+    data class Retrying(val attempt: Int) : StreamEvent()
     data class Failed(val message: String) : StreamEvent()
     object Done : StreamEvent()
 }
@@ -22,7 +23,9 @@ data class ToolSpec(val name: String, val description: String, val schema: JSONO
 
 class InferenceClient(
     private val origin: String = PlatformClient.INFERENCE_ORIGIN,
-    private val tokenProvider: () -> String?
+    private val tokenProvider: () -> String?,
+    private val userIdProvider: () -> String,
+    private val sessionIdProvider: () -> Long
 ) {
 
     private val http = OkHttpClient.Builder()
@@ -37,6 +40,7 @@ class InferenceClient(
         messages: JSONArray,
         tools: List<ToolSpec>,
         maxTokens: Int,
+        reasoning: Boolean,
         onEvent: (StreamEvent) -> Unit
     ) {
         val token = tokenProvider()
@@ -50,6 +54,12 @@ class InferenceClient(
             .put("max_tokens", maxTokens)
             .put("messages", messages)
         if (system.isNotEmpty()) body.put("system", system)
+        if (reasoning) {
+            body.put("thinking", JSONObject().put("type", "enabled"))
+            body.put("output_config", JSONObject().put("effort", "high"))
+        } else {
+            body.put("thinking", JSONObject().put("type", "disabled"))
+        }
         if (tools.isNotEmpty()) {
             val arr = JSONArray()
             for (t in tools) {
@@ -67,26 +77,62 @@ class InferenceClient(
             .header("anthropic-version", "2023-06-01")
             .header("accept", "text/event-stream")
             .header("content-type", "application/json")
+            .header("user-agent", PlatformClient.USER_AGENT)
+            .header("x-deepseek-harness-user-id", userIdProvider())
+            .header("x-deepseek-harness-session-id", sessionIdProvider().toString())
             .post(body.toString().toRequestBody(JSON))
             .build()
 
-        try {
-            http.newCall(req).execute().use { resp ->
-                if (!resp.isSuccessful) {
-                    val text = resp.body?.string().orEmpty()
-                    onEvent(StreamEvent.Failed(describeError(resp.code, text)))
+        var attempt = 0
+        while (true) {
+            var retry = false
+            var delay = 0L
+            try {
+                http.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) {
+                        val text = resp.body?.string().orEmpty()
+                        if (isRetryable(resp.code) && attempt < MAX_RETRIES) {
+                            retry = true
+                            delay = backoffMs(attempt, resp.header("retry-after"))
+                        } else {
+                            onEvent(StreamEvent.Failed(describeError(resp.code, text)))
+                            return
+                        }
+                    } else {
+                        val source = resp.body?.source()
+                        if (source == null) {
+                            onEvent(StreamEvent.Failed("响应为空"))
+                            return
+                        }
+                        readStream(source, onEvent)
+                        return
+                    }
+                }
+            } catch (e: Exception) {
+                if (attempt < MAX_RETRIES) {
+                    retry = true
+                    delay = backoffMs(attempt, null)
+                } else {
+                    onEvent(StreamEvent.Failed("网络错误：${e.message}"))
                     return
                 }
-                val source = resp.body?.source()
-                if (source == null) {
-                    onEvent(StreamEvent.Failed("响应为空"))
-                    return
-                }
-                readStream(source, onEvent)
             }
-        } catch (e: Exception) {
-            onEvent(StreamEvent.Failed("网络错误：${e.message}"))
+            if (!retry) return
+            attempt++
+            if (attempt > 1) onEvent(StreamEvent.Retrying(attempt))
+            Thread.sleep(delay)
         }
+    }
+
+    private fun isRetryable(code: Int): Boolean = code == 429 || code == 408 || code >= 500
+
+    private fun backoffMs(attempt: Int, retryAfter: String?): Long {
+        val fromHeader = retryAfter?.trim()?.toLongOrNull()
+        if (fromHeader != null) return (fromHeader * 1000L).coerceAtMost(MAX_DELAY_MS)
+        val base = INITIAL_DELAY_MS * (1L shl attempt.coerceAtMost(6))
+        val capped = base.coerceAtMost(MAX_DELAY_MS)
+        val jitter = (capped * JITTER_RATIO * (Math.random() * 2 - 1)).toLong()
+        return (capped + jitter).coerceAtLeast(100L)
     }
 
     private fun readStream(source: BufferedSource, onEvent: (StreamEvent) -> Unit) {
@@ -164,13 +210,21 @@ class InferenceClient(
         val prefix = when (code) {
             401 -> "登录已失效"
             402 -> "余额不足"
-            429 -> "请求过于频繁"
+            429 -> "请求被限流"
             else -> "服务返回 HTTP $code"
         }
-        return if (detail.isEmpty()) prefix else "$prefix：$detail"
+        return when {
+            detail.isNotEmpty() -> "$prefix：$detail"
+            text.isNotBlank() -> "$prefix：${text.take(300)}"
+            else -> prefix
+        }
     }
 
     companion object {
         private val JSON = "application/json; charset=utf-8".toMediaType()
+        private const val MAX_RETRIES = 5
+        private const val INITIAL_DELAY_MS = 500L
+        private const val MAX_DELAY_MS = 10000L
+        private const val JITTER_RATIO = 0.1
     }
 }

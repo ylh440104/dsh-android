@@ -84,6 +84,12 @@ private fun AssistantBubble(message: ChatMessage, showReasoning: Boolean) {
                 color = color,
                 style = MaterialTheme.typography.bodyLarge
             )
+        } else if (message.isRetrying) {
+            Text(
+                "服务繁忙，正在重试…",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         } else if (message.reasoning.isEmpty()) {
             TypingDots()
         }

@@ -47,7 +47,8 @@ class ConversationStore(context: Context) {
                 .put("reasoning", m.reasoning)
                 .put("toolName", m.toolName)
                 .put("toolInput", m.toolInput)
-                .put("isError", m.isError))
+                .put("isError", m.isError)
+                .put("isRetrying", m.isRetrying))
         }
         root.put("messages", arr)
         File(dir, "${conversation.id}.json").writeText(root.toString())
@@ -73,7 +74,8 @@ class ConversationStore(context: Context) {
                 o.optString("reasoning", ""),
                 o.optString("toolName", ""),
                 o.optString("toolInput", ""),
-                o.optBoolean("isError", false)
+                o.optBoolean("isError", false),
+                o.optBoolean("isRetrying", false)
             ))
         }
         return conversation

@@ -28,7 +28,7 @@ class ChatEngine(
             var failure: String? = null
 
             val index = sink.append(ChatMessage("assistant", ""))
-            inference.stream(model, SYSTEM_PROMPT, messages, specs, MAX_TOKENS) { event ->
+            inference.stream(model, SYSTEM_PROMPT, messages, specs, MAX_TOKENS, true) { event ->
                 when (event) {
                     is StreamEvent.Text -> {
                         textBuf.append(event.delta)
@@ -39,6 +39,10 @@ class ChatEngine(
                         sink.update(index, ChatMessage("assistant", textBuf.toString(), reasoningBuf.toString()))
                     }
                     is StreamEvent.ToolUse -> pendingTools.add(event)
+                    is StreamEvent.Retrying -> sink.update(
+                        index,
+                        ChatMessage("assistant", textBuf.toString(), reasoningBuf.toString(), isRetrying = true)
+                    )
                     is StreamEvent.Failed -> failure = event.message
                     else -> {}
                 }

@@ -48,7 +48,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val credentials = CredentialStore(app)
     private val conversations = ConversationStore(app)
     private val platform = PlatformClient()
-    private val inference = InferenceClient { credentials.loadToken() }
+    private val inference = InferenceClient(
+        tokenProvider = { credentials.loadToken() },
+        userIdProvider = { credentials.anonymousUserId() },
+        sessionIdProvider = { System.currentTimeMillis() }
+    )
     private val tools = ToolRegistry(File(app.filesDir, "workspace"))
     private val engine = ChatEngine(inference, tools)
 

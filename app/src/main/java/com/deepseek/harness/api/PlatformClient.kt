@@ -21,6 +21,20 @@ class PlatformClient(private val origin: String = PLATFORM_ORIGIN) {
         .writeTimeout(30, TimeUnit.SECONDS)
         .build()
 
+    private fun clientHeaders(): Map<String, String> = mapOf(
+        "user-agent" to USER_AGENT,
+        "x-client-bundle-id" to "",
+        "x-client-platform" to "desktop-win",
+        "x-client-version" to CLIENT_VERSION,
+        "x-client-locale" to "zh_CN",
+        "x-client-timezone-offset" to timezoneOffsetSeconds()
+    )
+
+    private fun timezoneOffsetSeconds(): String {
+        val offsetMs = java.util.TimeZone.getDefault().getOffset(System.currentTimeMillis())
+        return (-offsetMs / 1000).toString()
+    }
+
     fun authInit(
         codeChallenge: String,
         state: String,
@@ -100,29 +114,44 @@ class PlatformClient(private val origin: String = PLATFORM_ORIGIN) {
         val builder = Request.Builder()
             .url(url)
             .post(body.toString().toRequestBody(JSON))
+        for ((name, value) in clientHeaders()) builder.header(name, value)
         if (token != null) builder.header("x-dsh-auth-token", token)
         return execute(builder.build())
     }
 
     private fun get(url: String, token: String): JSONObject {
-        val req = Request.Builder()
+        val builder = Request.Builder()
             .url(url)
             .header("x-dsh-auth-token", token)
             .get()
-            .build()
-        return execute(req)
+        for ((name, value) in clientHeaders()) builder.header(name, value)
+        return execute(builder.build())
     }
 
     private fun execute(req: Request): JSONObject {
-        val response = try {
-            http.newCall(req).execute()
-        } catch (e: Exception) {
-            throw PlatformException("network", "网络请求失败：${e.message}")
-        }
-        response.use { resp ->
-            val text = resp.body?.string().orEmpty()
-            if (resp.code == 401) throw PlatformException("expired", "登录已失效")
-            if (!resp.isSuccessful) throw PlatformException("network", "服务返回 HTTP ${resp.code}")
+        var attempt = 0
+        while (true) {
+            val response = try {
+                http.newCall(req).execute()
+            } catch (e: Exception) {
+                if (attempt < MAX_RETRIES) {
+                    Thread.sleep(backoffMs(attempt))
+                    attempt++
+                    continue
+                }
+                throw PlatformException("network", "网络请求失败：${e.message}")
+            }
+            val text = response.use { it.body?.string().orEmpty() }
+            val code = response.code
+            if (code == 429 || code == 408 || code >= 500) {
+                if (attempt < MAX_RETRIES) {
+                    Thread.sleep(backoffMs(attempt))
+                    attempt++
+                    continue
+                }
+            }
+            if (code == 401) throw PlatformException("expired", "登录已失效")
+            if (code !in 200..299) throw PlatformException("network", "服务返回 HTTP $code")
             val root = try {
                 JSONObject(text)
             } catch (e: Exception) {
@@ -137,9 +166,24 @@ class PlatformClient(private val origin: String = PLATFORM_ORIGIN) {
         }
     }
 
+    private fun backoffMs(attempt: Int, retryAfter: String? = null): Long {
+        val fromHeader = retryAfter?.trim()?.toLongOrNull()
+        if (fromHeader != null) return (fromHeader * 1000L).coerceAtMost(MAX_DELAY_MS)
+        val base = INITIAL_DELAY_MS * (1L shl attempt.coerceAtMost(6))
+        val capped = base.coerceAtMost(MAX_DELAY_MS)
+        val jitter = (capped * JITTER_RATIO * (Math.random() * 2 - 1)).toLong()
+        return (capped + jitter).coerceAtLeast(100L)
+    }
+
     companion object {
         const val PLATFORM_ORIGIN = "https://platform.deepseek.com"
         const val INFERENCE_ORIGIN = "https://api.deepseek.com"
+        const val USER_AGENT = "deepseek-harness/0.2.0-rc.1 (+https://github.com/deepseek-ai/deepseek-harness)"
+        const val CLIENT_VERSION = "0.2.0-rc.1"
+        private const val MAX_RETRIES = 5
+        private const val INITIAL_DELAY_MS = 500L
+        private const val MAX_DELAY_MS = 10000L
+        private const val JITTER_RATIO = 0.1
         private val JSON = "application/json; charset=utf-8".toMediaType()
     }
 }

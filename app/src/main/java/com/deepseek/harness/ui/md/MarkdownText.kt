@@ -17,7 +17,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.ContentCopy
+
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -147,7 +147,7 @@ private fun CodeBlock(block: MdBlock.Code, onCopy: (String) -> Unit) {
                     }
                 ) {
                     Icon(
-                        if (copied) Icons.Default.Check else Icons.Default.ContentCopy,
+                        Icons.Default.Check,
                         contentDescription = "复制代码",
                         tint = if (copied) MaterialTheme.colorScheme.primary
                         else MaterialTheme.colorScheme.onSurfaceVariant,

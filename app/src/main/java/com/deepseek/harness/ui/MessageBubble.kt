@@ -16,7 +16,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.ContentCopy
+
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.Icon
@@ -137,7 +137,7 @@ private fun AssistantBubble(message: ChatMessage, showReasoning: Boolean) {
                         }
                 ) {
                     Icon(
-                        if (copied) Icons.Default.Check else Icons.Default.ContentCopy,
+                        Icons.Default.Check,
                         contentDescription = "复制回复",
                         tint = if (copied) MaterialTheme.colorScheme.primary
                         else MaterialTheme.colorScheme.onSurfaceVariant,

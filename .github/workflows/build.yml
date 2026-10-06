@@ -92,7 +92,8 @@ jobs:
           test -f app/src/main/java/com/deepseek/harness/ui/md/MarkdownParser.kt || (echo "markdown parser missing" && exit 1)
           test -f app/src/main/java/com/deepseek/harness/ui/md/MarkdownText.kt || (echo "markdown renderer missing" && exit 1)
           grep -q 'MdBlock.Code' app/src/main/java/com/deepseek/harness/ui/md/MarkdownText.kt
-          grep -q 'ContentCopy' app/src/main/java/com/deepseek/harness/ui/MessageBubble.kt
+          grep -q 'LocalClipboardManager' app/src/main/java/com/deepseek/harness/ui/MessageBubble.kt
+          grep -q 'MarkdownText' app/src/main/java/com/deepseek/harness/ui/MessageBubble.kt
           echo "markdown and copy present"
       - name: Assert shizuku integration present
         run: |

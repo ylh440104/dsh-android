@@ -89,12 +89,13 @@ jobs:
       - name: Assert shizuku integration present
         run: |
           F=app/src/main/java/com/deepseek/harness/shell/ShizukuManager.kt
-          grep -q 'Shizuku.newProcess' $F
+          grep -q 'IShizukuService' $F
           grep -q 'requestPermission' $F
           grep -q 'checkSelfPermission' $F
           M=app/src/main/AndroidManifest.xml
           grep -q 'rikka.shizuku.ShizukuProvider' $M
           grep -q 'MANAGE_EXTERNAL_STORAGE' $M
+          grep -q 'shizuku:aidl' app/build.gradle
           echo "shizuku integration present"
       - name: Assert path sandbox rules present
         run: |

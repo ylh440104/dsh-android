@@ -148,18 +148,13 @@ class ToolRegistry(workspace: File) {
 
     private fun runShell(command: String): ToolOutcome {
         if (command.isBlank()) return ToolOutcome.Err("command parameter is required")
-        if (!ShizukuManager.isRunning()) {
-            return ToolOutcome.Err("Shizuku 服务未运行，请先在设备上启动 Shizuku 并授权本应用")
-        }
-        if (!ShizukuManager.hasPermission()) {
-            return ToolOutcome.Err("Shizuku 权限未授予，请在应用内点击授权")
-        }
         val result = ShizukuManager.execute(command)
         val sb = StringBuilder()
         sb.append("$ ").append(command).append('\n')
         if (result.stdout.isNotBlank()) sb.append(result.stdout.trimEnd()).append('\n')
         if (result.stderr.isNotBlank()) sb.append("[stderr] ").append(result.stderr.trimEnd()).append('\n')
         sb.append("[exit] ").append(result.exitCode)
+        sb.append("  [identity] ").append(if (result.elevated) "shizuku" else "app")
         return if (result.exitCode == 0) {
             ToolOutcome.Ok(sb.toString().trimEnd())
         } else {

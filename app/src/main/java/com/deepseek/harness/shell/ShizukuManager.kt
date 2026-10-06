@@ -2,9 +2,19 @@ package com.deepseek.harness.shell
 
 import android.content.Context
 import android.content.pm.PackageManager
+import android.os.ParcelFileDescriptor
+import moe.shizuku.server.IShizukuService
 import rikka.shizuku.Shizuku
+import java.io.BufferedReader
+import java.io.FileInputStream
+import java.io.InputStreamReader
 
-data class ShellResult(val stdout: String, val stderr: String, val exitCode: Int) {
+data class ShellResult(
+    val stdout: String,
+    val stderr: String,
+    val exitCode: Int,
+    val elevated: Boolean = false
+) {
     val ok: Boolean get() = exitCode == 0
 }
 
@@ -76,20 +86,56 @@ object ShizukuManager {
         }
     }
 
-    fun execute(command: String, timeoutMs: Long = 30000L): ShellResult {
-        if (!isRunning()) return ShellResult("", "Shizuku 服务未运行，请先启动 Shizuku", -1)
-        if (!hasPermission()) return ShellResult("", "Shizuku 权限未授予", -1)
+    fun execute(command: String): ShellResult {
         val parts = parseCommand(command)
         if (parts.isEmpty()) return ShellResult("", "命令为空", -1)
-        return try {
-            val process = Shizuku.newProcess(parts.toTypedArray(), null, null)
-            val stdout = process.inputStream.bufferedReader().use { it.readText() }
-            val stderr = process.errorStream.bufferedReader().use { it.readText() }
-            val exit = process.waitFor()
-            ShellResult(stdout, stderr, exit)
-        } catch (e: Exception) {
-            ShellResult("", "命令执行失败：${e.message}", -1)
+        if (isRunning() && hasPermission()) {
+            runElevated(parts)?.let { return it }
         }
+        return runLocal(parts)
+    }
+
+    private fun runElevated(parts: List<String>): ShellResult? = try {
+        val service = Shizuku::class.java
+            .getDeclaredMethod("requireService")
+            .apply { isAccessible = true }
+            .invoke(null) as? IShizukuService
+        if (service == null) {
+            null
+        } else {
+            val process = service.newProcess(parts.toTypedArray(), null, null)
+            if (process == null) {
+                null
+            } else {
+                val stdout = readFd(process.inputStream)
+                val stderr = readFd(process.errorStream)
+                val exit = process.waitFor()
+                runCatching { process.destroy() }
+                ShellResult(stdout, stderr, exit, elevated = true)
+            }
+        }
+    } catch (e: Exception) {
+        null
+    }
+
+    private fun readFd(pfd: ParcelFileDescriptor?): String {
+        if (pfd == null) return ""
+        return try {
+            FileInputStream(pfd.fileDescriptor).use { input ->
+                BufferedReader(InputStreamReader(input)).use { it.readText() }
+            }
+        } catch (e: Exception) {
+            ""
+        }
+    }
+
+    private fun runLocal(parts: List<String>): ShellResult = try {
+        val process = ProcessBuilder(parts).start()
+        val stdout = process.inputStream.bufferedReader().use { it.readText() }
+        val stderr = process.errorStream.bufferedReader().use { it.readText() }
+        ShellResult(stdout, stderr, process.waitFor(), elevated = false)
+    } catch (e: Exception) {
+        ShellResult("", "命令执行失败：${e.message}", -1, elevated = false)
     }
 
     private fun parseCommand(command: String): List<String> {

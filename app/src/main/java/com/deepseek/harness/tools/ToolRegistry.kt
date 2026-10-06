@@ -1,70 +1,104 @@
 package com.deepseek.harness.tools
 
 import com.deepseek.harness.api.ToolSpec
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 
 class ToolResult(val content: String, val isError: Boolean = false)
 
-class ToolRegistry(private val workspace: File) {
+class ToolRegistry(workspace: File) {
 
-    init {
-        if (!workspace.exists()) workspace.mkdirs()
-    }
+    private val files = FileTools(workspace)
 
     fun specs(): List<ToolSpec> = listOf(
-        ToolSpec(
-            "list_dir",
-            "列出工作区目录下的文件与子目录。参数 path 为相对工作区的路径，留空表示根目录。",
-            JSONObject().apply {
-                put("type", "object")
-                put("properties", JSONObject().put("path", JSONObject().apply {
-                    put("type", "string")
-                    put("description", "相对工作区的目录路径，留空表示根目录")
-                }))
-            }
+        spec(
+            "list_files",
+            "List files and subdirectories in a directory. Path is relative to the workspace root; leave empty for the root.",
+            props = listOf(
+                "path" to stringProp("directory path relative to the workspace root, empty for root", required = true)
+            )
         ),
-        ToolSpec(
+        spec(
             "read_file",
-            "读取工作区中某个文本文件的内容。参数 path 为相对工作区的文件路径。",
-            JSONObject().apply {
-                put("type", "object")
-                put("properties", JSONObject().put("path", JSONObject().apply {
-                    put("type", "string")
-                    put("description", "相对工作区的文件路径")
-                }))
-                put("required", org.json.JSONArray().put("path"))
-            }
+            "Read a text file. Content is returned with line numbers. Large files should be read with read_file_part instead.",
+            props = listOf(
+                "path" to stringProp("file path relative to the workspace root", required = true)
+            )
         ),
-        ToolSpec(
+        spec(
+            "read_file_part",
+            "Read a slice of a text file by line range. Use this for large files.",
+            props = listOf(
+                "path" to stringProp("file path relative to the workspace root", required = true),
+                "start_line" to intProp("first line to read, 1-indexed, defaults to 1"),
+                "end_line" to intProp("last line to read, 1-indexed, inclusive, defaults to start_line + 199")
+            )
+        ),
+        spec(
+            "create_file",
+            "Create a new file with the given content. Fails if the file already exists.",
+            props = listOf(
+                "path" to stringProp("file path relative to the workspace root", required = true),
+                "content" to stringProp("full file content", required = true)
+            )
+        ),
+        spec(
+            "edit_file",
+            "Edit an existing file by replacing an exact snippet. The 'old' text must appear exactly once. Read the file first and copy the exact text.",
+            props = listOf(
+                "path" to stringProp("file path relative to the workspace root", required = true),
+                "old" to stringProp("the exact existing text to replace", required = true),
+                "new" to stringProp("the replacement text", required = true)
+            )
+        ),
+        spec(
             "write_file",
-            "把文本内容写入工作区中的文件，文件不存在则创建，存在则覆盖。",
-            JSONObject().apply {
-                put("type", "object")
-                put("properties", JSONObject().apply {
-                    put("path", JSONObject().apply {
-                        put("type", "string")
-                        put("description", "相对工作区的文件路径")
-                    })
-                    put("content", JSONObject().apply {
-                        put("type", "string")
-                        put("description", "要写入的完整文本内容")
-                    })
-                })
-                put("required", org.json.JSONArray().put("path").put("content"))
-            }
+            "Overwrite a file with new content, creating it if missing. Prefer create_file and edit_file when possible.",
+            props = listOf(
+                "path" to stringProp("file path relative to the workspace root", required = true),
+                "content" to stringProp("full new content", required = true)
+            )
         ),
-        ToolSpec(
+        spec(
             "delete_file",
-            "删除工作区中的某个文件。参数 path 为相对工作区的文件路径。",
-            JSONObject().apply {
-                put("type", "object")
-                put("properties", JSONObject().put("path", JSONObject().apply {
-                    put("type", "string")
-                    put("description", "相对工作区的文件路径")
-                }))
-                put("required", org.json.JSONArray().put("path"))
-            }
+            "Delete a file or directory inside the workspace.",
+            props = listOf(
+                "path" to stringProp("target path relative to the workspace root", required = true),
+                "recursive" to boolProp("set true to delete a directory and its contents, default false")
+            )
+        ),
+        spec(
+            "make_directory",
+            "Create a directory inside the workspace.",
+            props = listOf(
+                "path" to stringProp("directory path relative to the workspace root", required = true),
+                "create_parents" to boolProp("set true to create missing parent directories, default false")
+            )
+        ),
+        spec(
+            "find_files",
+            "Search for files by name pattern such as *.txt. Supports * and ? wildcards.",
+            props = listOf(
+                "path" to stringProp("directory to search in, empty for the workspace root"),
+                "pattern" to stringProp("name pattern, for example *.txt", required = true),
+                "max_depth" to intProp("maximum subdirectory depth, -1 for unlimited"),
+                "case_insensitive" to boolProp("set true to ignore case, default false")
+            )
+        ),
+        spec(
+            "file_exists",
+            "Check whether a file or directory exists.",
+            props = listOf(
+                "path" to stringProp("path relative to the workspace root", required = true)
+            )
+        ),
+        spec(
+            "file_info",
+            "Show size, type and modification time of a file or directory.",
+            props = listOf(
+                "path" to stringProp("path relative to the workspace root", required = true)
+            )
         )
     )
 
@@ -72,68 +106,58 @@ class ToolRegistry(private val workspace: File) {
         val input = try {
             if (inputJson.isBlank()) JSONObject() else JSONObject(inputJson)
         } catch (e: Exception) {
-            return ToolResult("参数不是合法 JSON：${e.message}", true)
+            return ToolResult("Arguments are not valid JSON: ${e.message}", true)
         }
-        return try {
-            when (name) {
-                "list_dir" -> listDir(input.optString("path", ""))
-                "read_file" -> readFile(input.optString("path", ""))
-                "write_file" -> writeFile(input.optString("path", ""), input.optString("content", ""))
-                "delete_file" -> deleteFile(input.optString("path", ""))
-                else -> ToolResult("未知工具：$name", true)
+        val outcome = when (name) {
+            "list_files" -> files.listFiles(input.optString("path", ""))
+            "read_file" -> files.readFile(input.optString("path", ""), 1, Int.MAX_VALUE)
+            "read_file_part" -> {
+                val start = input.optInt("start_line", 1).coerceAtLeast(1)
+                val end = input.optInt("end_line", start + 199)
+                files.readFile(input.optString("path", ""), start, end)
             }
-        } catch (e: Exception) {
-            ToolResult("执行失败：${e.message}", true)
+            "create_file" -> files.createFile(input.optString("path", ""), input.optString("content", ""))
+            "edit_file" -> files.applyEdit(input.optString("path", ""), input.optString("old", ""), input.optString("new", ""))
+            "write_file" -> files.writeFile(input.optString("path", ""), input.optString("content", ""))
+            "delete_file" -> files.deleteFile(input.optString("path", ""), input.optBoolean("recursive", false))
+            "make_directory" -> files.makeDirectory(input.optString("path", ""), input.optBoolean("create_parents", false))
+            "find_files" -> files.findFiles(
+                input.optString("path", ""),
+                input.optString("pattern", ""),
+                if (input.has("max_depth")) input.optInt("max_depth", -1) else -1,
+                input.optBoolean("case_insensitive", false)
+            )
+            "file_exists" -> files.fileExists(input.optString("path", ""))
+            "file_info" -> files.fileInfo(input.optString("path", ""))
+            else -> ToolOutcome.Err("Unknown tool: $name")
+        }
+        return when (outcome) {
+            is ToolOutcome.Ok -> ToolResult(outcome.text, false)
+            is ToolOutcome.Err -> ToolResult(outcome.message, true)
         }
     }
 
-    private fun resolve(path: String): File? {
-        val candidate = if (path.isBlank()) workspace else File(workspace, path)
-        val canonical = candidate.canonicalFile
-        val root = workspace.canonicalFile
-        return if (canonical.path == root.path || canonical.path.startsWith(root.path + File.separator)) canonical else null
-    }
-
-    private fun listDir(path: String): ToolResult {
-        val dir = resolve(path) ?: return ToolResult("路径越界", true)
-        if (!dir.exists()) return ToolResult("目录不存在：$path", true)
-        if (!dir.isDirectory) return ToolResult("不是目录：$path", true)
-        val entries = dir.listFiles()?.sortedBy { it.name } ?: emptyList()
-        if (entries.isEmpty()) return ToolResult("(空目录)")
-        val sb = StringBuilder()
-        for (entry in entries) {
-            sb.append(if (entry.isDirectory) "[dir]  " else "[file] ")
-            sb.append(entry.name)
-            if (entry.isFile) sb.append("  (").append(entry.length()).append(" bytes)")
-            sb.append("\n")
+    private fun spec(name: String, description: String, props: List<Pair<String, JSONObject>>): ToolSpec {
+        val properties = JSONObject()
+        val required = JSONArray()
+        for ((key, value) in props) {
+            properties.put(key, value)
+            if (value.optBoolean("__required", false)) required.put(key)
+            value.remove("__required")
         }
-        return ToolResult(sb.toString().trimEnd())
+        val schema = JSONObject()
+            .put("type", "object")
+            .put("properties", properties)
+        if (required.length() > 0) schema.put("required", required)
+        return ToolSpec(name, description, schema)
     }
 
-    private fun readFile(path: String): ToolResult {
-        val file = resolve(path) ?: return ToolResult("路径越界", true)
-        if (!file.exists()) return ToolResult("文件不存在：$path", true)
-        if (file.isDirectory) return ToolResult("这是目录，请用 list_dir", true)
-        if (file.length() > MAX_READ_BYTES) return ToolResult("文件过大（${file.length()} 字节），超过读取上限", true)
-        return ToolResult(file.readText())
-    }
+    private fun stringProp(description: String, required: Boolean = false): JSONObject =
+        JSONObject().put("type", "string").put("description", description).put("__required", required)
 
-    private fun writeFile(path: String, content: String): ToolResult {
-        val file = resolve(path) ?: return ToolResult("路径越界", true)
-        file.parentFile?.mkdirs()
-        file.writeText(content)
-        return ToolResult("已写入 ${file.relativeTo(workspace).path}（${content.toByteArray().size} 字节）")
-    }
+    private fun intProp(description: String): JSONObject =
+        JSONObject().put("type", "integer").put("description", description)
 
-    private fun deleteFile(path: String): ToolResult {
-        val file = resolve(path) ?: return ToolResult("路径越界", true)
-        if (!file.exists()) return ToolResult("文件不存在：$path", true)
-        if (file.isDirectory) return ToolResult("请勿删除目录", true)
-        file.delete()
-        return ToolResult("已删除 $path")
-    }
-
-    companion object {
-        private const val MAX_READ_BYTES = 512L * 1024L
-    }
+    private fun boolProp(description: String): JSONObject =
+        JSONObject().put("type", "boolean").put("description", description)
 }

@@ -79,6 +79,19 @@ jobs:
           grep -q 'SHA-256' $F
           grep -q 'URL_SAFE' $F
           echo "pkce present"
+      - name: Assert tool surface present
+        run: |
+          F=app/src/main/java/com/deepseek/harness/tools/ToolRegistry.kt
+          for t in list_files read_file read_file_part create_file edit_file write_file delete_file make_directory find_files file_exists file_info; do
+            grep -q "\"$t\"" $F || (echo "missing tool $t" && exit 1)
+          done
+          echo "tool surface present"
+      - name: Assert workspace sandbox present
+        run: |
+          F=app/src/main/java/com/deepseek/harness/tools/PathGuard.kt
+          grep -q 'canonicalFile' $F
+          grep -q 'startsWith' $F
+          echo "path sandbox present"
       - name: Assert no bundled runtime leftovers
         run: |
           if [ -d tools ]; then echo "tools dir should be gone"; exit 1; fi

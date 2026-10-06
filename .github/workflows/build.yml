@@ -106,4 +106,4 @@ jobs:
           name: ${{ github.ref_name }}
           files: apk/*.apk
           draft: false
-          prerelease: true
+          prerelease: ${{ contains(github.ref_name, '-rc') }}

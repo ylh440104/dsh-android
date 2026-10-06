@@ -53,8 +53,9 @@ jobs:
         run: |
           fail=0
           while IFS= read -r file; do
-            if grep -qE '^\s*//|/\*|\*/' "$file"; then
+            if grep -qE '^[[:space:]]*//|^[[:space:]]*/\*|\*/[[:space:]]*$' "$file"; then
               echo "comment found in $file"
+              grep -nE '^[[:space:]]*//|^[[:space:]]*/\*|\*/[[:space:]]*$' "$file"
               fail=1
             fi
           done < <(find app/src/main/java -name '*.kt')

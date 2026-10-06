@@ -60,7 +60,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         userIdProvider = { credentials.anonymousUserId() },
         sessionIdProvider = { System.currentTimeMillis() }
     )
-    private val tools = ToolRegistry(File(app.filesDir, "workspace"))
+    private val tools = ToolRegistry(app, File(app.filesDir, "workspace"))
     private val engine = ChatEngine(inference, tools)
 
     private val _state = MutableStateFlow(UiState())

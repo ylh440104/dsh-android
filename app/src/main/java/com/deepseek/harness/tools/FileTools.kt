@@ -177,6 +177,52 @@ class FileTools(private val workspace: File) {
         return ToolOutcome.Ok(sb.toString())
     }
 
+    fun copyFile(rawSource: String, rawDest: String): ToolOutcome {
+        val sourcePath = PathGuard.normalize(rawSource)
+        val destPath = PathGuard.normalize(rawDest)
+        if (PathGuard.isProtected(destPath)) return ToolOutcome.Err("Refusing to write protected path: $destPath")
+        val source = resolve(rawSource)
+        if (!source.exists()) return ToolOutcome.Err("No such file or directory: $sourcePath")
+        val dest = resolve(rawDest)
+        if (dest.exists()) return ToolOutcome.Err("Destination already exists: $destPath")
+        return try {
+            dest.parentFile?.mkdirs()
+            if (source.isDirectory) {
+                source.copyRecursively(dest, overwrite = false)
+            } else {
+                source.copyTo(dest, overwrite = false)
+            }
+            ToolOutcome.Ok("Copied $sourcePath -> $destPath")
+        } catch (e: Exception) {
+            ToolOutcome.Err("Copy failed: ${e.message}")
+        }
+    }
+
+    fun moveFile(rawSource: String, rawDest: String): ToolOutcome {
+        val sourcePath = PathGuard.normalize(rawSource)
+        val destPath = PathGuard.normalize(rawDest)
+        if (PathGuard.isProtected(destPath)) return ToolOutcome.Err("Refusing to write protected path: $destPath")
+        if (PathGuard.isProtected(sourcePath)) return ToolOutcome.Err("Refusing to move protected path: $sourcePath")
+        val source = resolve(rawSource)
+        if (!source.exists()) return ToolOutcome.Err("No such file or directory: $sourcePath")
+        val dest = resolve(rawDest)
+        if (dest.exists()) return ToolOutcome.Err("Destination already exists: $destPath")
+        return try {
+            dest.parentFile?.mkdirs()
+            if (source.renameTo(dest)) {
+                ToolOutcome.Ok("Moved $sourcePath -> $destPath")
+            } else {
+                if (source.isDirectory) source.copyRecursively(dest, overwrite = false)
+                else source.copyTo(dest, overwrite = false)
+                val removed = if (source.isDirectory) source.deleteRecursively() else source.delete()
+                if (removed) ToolOutcome.Ok("Moved $sourcePath -> $destPath")
+                else ToolOutcome.Err("Copied but could not remove the original: $sourcePath")
+            }
+        } catch (e: Exception) {
+            ToolOutcome.Err("Move failed: ${e.message}")
+        }
+    }
+
     fun findFiles(rawRoot: String, pattern: String, maxDepth: Int, caseInsensitive: Boolean): ToolOutcome {
         if (pattern.isBlank()) return ToolOutcome.Err("pattern parameter is required")
         val root = PathGuard.normalize(rawRoot)

@@ -82,10 +82,17 @@ jobs:
       - name: Assert tool surface present
         run: |
           F=app/src/main/java/com/deepseek/harness/tools/ToolRegistry.kt
-          for t in list_files read_file read_file_part create_file edit_file write_file delete_file make_directory find_files file_exists file_info shell; do
+          for t in list_files read_file read_file_part create_file edit_file write_file delete_file make_directory find_files file_exists file_info copy_file move_file grep_code grep_context zip_files unzip_files list_zip http_request device_info current_time list_apps app_info start_app stop_app open_url open_file get_system_setting shell; do
             grep -q "\"$t\"" $F || (echo "missing tool $t" && exit 1)
           done
           echo "tool surface present"
+      - name: Assert markdown renderer present
+        run: |
+          test -f app/src/main/java/com/deepseek/harness/ui/md/MarkdownParser.kt || (echo "markdown parser missing" && exit 1)
+          test -f app/src/main/java/com/deepseek/harness/ui/md/MarkdownText.kt || (echo "markdown renderer missing" && exit 1)
+          grep -q 'MdBlock.Code' app/src/main/java/com/deepseek/harness/ui/md/MarkdownText.kt
+          grep -q 'ContentCopy' app/src/main/java/com/deepseek/harness/ui/MessageBubble.kt
+          echo "markdown and copy present"
       - name: Assert shizuku integration present
         run: |
           F=app/src/main/java/com/deepseek/harness/shell/ShizukuManager.kt

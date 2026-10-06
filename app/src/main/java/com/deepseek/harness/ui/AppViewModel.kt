@@ -39,7 +39,8 @@ data class UiState(
     val error: String? = null,
     val info: String? = null,
     val model: String = "deepseek-flash",
-    val showReasoning: Boolean = false
+    val showReasoning: Boolean = false,
+    val signingIn: Boolean = false
 )
 
 class AppViewModel(app: Application) : AndroidViewModel(app) {
@@ -122,7 +123,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun signIn(onOpenBrowser: (String) -> Unit) {
-        _state.value = _state.value.copy(error = null, info = null)
+        if (_state.value.signingIn) return
+        _state.value = _state.value.copy(error = null, info = null, signingIn = true)
         viewModelScope.launch {
             val result = withContext(Dispatchers.IO) {
                 runCatching {
@@ -176,14 +178,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                         }.also { start.server.stop() }
                     }
                     outcome.onSuccess {
-                        _state.value = _state.value.copy(signedIn = true, account = it, info = "登录成功")
+                        _state.value = _state.value.copy(signedIn = true, account = it, info = "登录成功", signingIn = false)
                         refreshAccount()
                     }.onFailure {
-                        _state.value = _state.value.copy(error = it.message ?: "登录失败")
+                        _state.value = _state.value.copy(error = it.message ?: "登录失败", signingIn = false)
                     }
                 }
             }.onFailure {
-                _state.value = _state.value.copy(error = it.message ?: "登录启动失败")
+                _state.value = _state.value.copy(error = it.message ?: "登录启动失败", signingIn = false)
             }
         }
     }

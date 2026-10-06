@@ -3,9 +3,10 @@ package com.deepseek.harness
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.DrawerValue
@@ -29,12 +30,13 @@ import com.deepseek.harness.ui.DshTheme
 import com.deepseek.harness.ui.SignInScreen
 import kotlinx.coroutines.launch
 
-class MainActivity : ComponentActivity() {
+class MainActivity : AppCompatActivity() {
 
     private val viewModel: AppViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
         setContent {
             DshTheme {
                 AppRoot(viewModel) { url -> openBrowser(url) }
@@ -58,19 +60,27 @@ private fun AppRoot(viewModel: AppViewModel, onOpenBrowser: (String) -> Unit) {
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
 
-    LaunchedEffect(state.error, state.info) {
-        val message = state.error ?: state.info
-        if (message != null) {
+    LaunchedEffect(state.error, state.signedIn) {
+        val message = state.error
+        if (message != null && state.signedIn) {
             snackbarHost.showSnackbar(message)
             viewModel.dismissMessages()
         }
     }
 
-    Scaffold(snackbarHost = { SnackbarHost(snackbarHost) }) { padding ->
+    LaunchedEffect(state.info, state.signedIn) {
+        val message = state.info
+        if (message != null && state.signedIn) {
+            snackbarHost.showSnackbar(message)
+            viewModel.dismissMessages()
+        }
+    }
+
+    Scaffold(snackbarHost = { SnackbarHost(snackbarHost) }) { _ ->
         Box(modifier = Modifier.fillMaxSize()) {
             if (!state.signedIn) {
                 SignInScreen(
-                    busy = state.loadingBalance,
+                    busy = state.signingIn,
                     statusText = state.info ?: state.error,
                     onSignIn = { viewModel.signIn(onOpenBrowser) }
                 )

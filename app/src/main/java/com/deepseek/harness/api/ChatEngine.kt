@@ -164,14 +164,37 @@ class ChatEngine(
             "\n" +
             "网络工具：\n" +
             "- http_request：发送 HTTP 请求，支持 GET/POST/PUT/PATCH/DELETE 与自定义头\n" +
+            "- visit_web：抓取网页正文，可附带链接列表\n" +
+            "- download_file：从 URL 下载文件到本地\n" +
             "\n" +
-            "设备工具：\n" +
+            "设备与系统工具：\n" +
             "- device_info：机型、系统版本、内存、存储\n" +
-            "- current_time：当前时间\n" +
-            "- list_apps / app_info：已安装应用列表与详情\n" +
+            "- current_time / date_convert：当前时间与日期格式转换\n" +
+            "- list_apps / app_info / list_processes：应用与进程\n" +
             "- start_app / stop_app：启动或停止应用\n" +
             "- open_url / open_file：用系统默认应用打开链接或文件\n" +
-            "- get_system_setting：读取系统设置项\n" +
+            "- get_system_setting / modify_system_setting：读写系统设置\n" +
+            "- battery_status / network_status / wifi_info / screen_info：电池、网络、屏幕状态\n" +
+            "- get_device_location：读取最近定位\n" +
+            "- volume / brightness：音量与屏幕亮度\n" +
+            "- clipboard_get / clipboard_set：读写剪贴板\n" +
+            "- toast / send_notification / vibrate：轻提示、通知、震动\n" +
+            "- execute_intent / send_broadcast：发送 Intent 与广播\n" +
+            "- install_apk / uninstall_app：打开安装器与卸载界面\n" +
+            "\n" +
+            "屏幕自动化工具（需要 Shizuku 提权）：\n" +
+            "- tap / long_press / swipe / press_key / set_input_text：模拟点击、长按、滑动、按键与输入\n" +
+            "- screenshot：截图并保存为 PNG\n" +
+            "- screen_size / current_activity / list_windows：屏幕尺寸、当前前台界面、窗口列表\n" +
+            "- launch_activity / force_stop / clear_app_data：启动组件、强停、清数据\n" +
+            "- grant_permission：授予应用运行时权限\n" +
+            "- pm_install / pm_uninstall：静默安装与卸载\n" +
+            "\n" +
+            "计算与文本工具：\n" +
+            "- calculate：数学表达式求值，支持括号、幂、三角函数、log 等\n" +
+            "- base64_encode / base64_decode / hash_text / uuid / random_number\n" +
+            "- text_transform / regex_op / sort_lines / diff_text：文本处理与对比\n" +
+            "- url_encode / url_decode / json_format / convert_unit：编码与格式化\n" +
             "\n" +
             "Shell：\n" +
             "- shell：在设备上执行 shell 命令。用户已启动并授权 Shizuku 时以提权身份执行，否则退回应用自身身份，结果里会标注 identity\n" +

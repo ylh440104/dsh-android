@@ -83,7 +83,7 @@ jobs:
       - name: Assert tool surface present
         run: |
           F=app/src/main/java/com/deepseek/harness/tools/ToolRegistry.kt
-          for t in list_files read_file read_file_part create_file edit_file write_file delete_file make_directory find_files file_exists file_info copy_file move_file grep_code grep_context zip_files unzip_files list_zip http_request device_info current_time list_apps app_info start_app stop_app open_url open_file get_system_setting shell; do
+          for t in list_files read_file read_file_part create_file edit_file write_file delete_file make_directory find_files file_exists file_info copy_file move_file grep_code grep_context zip_files unzip_files list_zip http_request visit_web download_file device_info current_time list_apps app_info start_app stop_app open_url open_file get_system_setting modify_system_setting battery_status network_status wifi_info get_device_location volume brightness clipboard_get clipboard_set toast send_notification vibrate execute_intent send_broadcast install_apk uninstall_app list_processes screen_info tap long_press swipe press_key set_input_text screenshot screen_size current_activity list_windows launch_activity force_stop clear_app_data grant_permission pm_install pm_uninstall calculate base64_encode base64_decode hash_text uuid random_number text_transform regex_op sort_lines diff_text url_encode url_decode json_format date_convert convert_unit shell; do
             grep -q "\"$t\"" $F || (echo "missing tool $t" && exit 1)
           done
           echo "tool surface present"

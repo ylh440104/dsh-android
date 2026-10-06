@@ -15,6 +15,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.Icon
@@ -22,17 +24,21 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.deepseek.harness.model.ChatMessage
+import com.deepseek.harness.ui.md.MarkdownText
+import kotlinx.coroutines.delay
 
 @Composable
 fun MessageBubble(message: ChatMessage, showReasoning: Boolean) {
@@ -45,29 +51,61 @@ fun MessageBubble(message: ChatMessage, showReasoning: Boolean) {
 
 @Composable
 private fun UserBubble(text: String) {
+    val clipboard = LocalClipboardManager.current
+    var copied by remember { mutableStateOf(false) }
+    LaunchedEffect(copied) {
+        if (copied) {
+            delay(1200)
+            copied = false
+        }
+    }
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 14.dp, vertical = 5.dp),
         horizontalArrangement = Arrangement.End
     ) {
-        Surface(
-            color = MaterialTheme.colorScheme.primary,
-            shape = RoundedCornerShape(16.dp, 16.dp, 4.dp, 16.dp),
-            modifier = Modifier.fillMaxWidth(0.86f)
-        ) {
-            Text(
-                text,
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                color = MaterialTheme.colorScheme.onPrimary,
-                style = MaterialTheme.typography.bodyLarge
-            )
+        Column(horizontalAlignment = Alignment.End) {
+            Surface(
+                color = MaterialTheme.colorScheme.primary,
+                shape = RoundedCornerShape(16.dp, 16.dp, 4.dp, 16.dp),
+                modifier = Modifier
+                    .fillMaxWidth(0.86f)
+                    .clickable {
+                        clipboard.setText(AnnotatedString(text))
+                        copied = true
+                    }
+            ) {
+                Text(
+                    text,
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                    color = MaterialTheme.colorScheme.onPrimary,
+                    style = MaterialTheme.typography.bodyLarge
+                )
+            }
+            if (copied) {
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    "已复制",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
         }
     }
 }
 
 @Composable
 private fun AssistantBubble(message: ChatMessage, showReasoning: Boolean) {
+    val clipboard = LocalClipboardManager.current
+    var copied by remember { mutableStateOf(false) }
+    LaunchedEffect(copied) {
+        if (copied) {
+            delay(1200)
+            copied = false
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -78,12 +116,42 @@ private fun AssistantBubble(message: ChatMessage, showReasoning: Boolean) {
             Spacer(Modifier.height(8.dp))
         }
         if (message.text.isNotEmpty()) {
-            val color = if (message.isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
-            Text(
-                message.text,
-                color = color,
-                style = MaterialTheme.typography.bodyLarge
-            )
+            if (message.isError) {
+                Text(
+                    message.text,
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodyLarge
+                )
+            } else {
+                MarkdownText(
+                    markdown = message.text,
+                    onCopy = { clipboard.setText(AnnotatedString(it)) }
+                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .padding(top = 6.dp)
+                        .clickable {
+                            clipboard.setText(AnnotatedString(message.text))
+                            copied = true
+                        }
+                ) {
+                    Icon(
+                        if (copied) Icons.Default.Check else Icons.Default.ContentCopy,
+                        contentDescription = "复制回复",
+                        tint = if (copied) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        if (copied) "已复制" else "复制",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (copied) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
         } else if (message.isRetrying) {
             Text(
                 "服务繁忙，正在重试…",

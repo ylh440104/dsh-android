@@ -90,11 +90,10 @@ private fun AppRoot(viewModel: AppViewModel, onOpenBrowser: (String) -> Unit) {
                     drawerContent = {
                         ModalDrawerSheet {
                             AppDrawer(
-                                accountName = state.account?.name ?: "DeepSeek 用户",
-                                accountContact = state.account?.contact.orEmpty(),
-                                balanceText = state.balance?.normalText() ?: "--",
-                                bonusText = state.balance?.bonusText() ?: "--",
-                                balanceError = state.balanceError,
+                                accounts = state.accounts,
+                                activeId = state.activeId,
+                                totalBalanceText = state.totalBalanceText,
+                                autoSwitch = state.autoSwitch,
                                 loadingBalance = state.loadingBalance,
                                 conversations = state.conversations,
                                 currentId = state.current?.id,
@@ -102,6 +101,13 @@ private fun AppRoot(viewModel: AppViewModel, onOpenBrowser: (String) -> Unit) {
                                 shizukuRunning = state.shizukuRunning,
                                 shizukuGranted = state.shizukuGranted,
                                 storageGranted = state.storageGranted,
+                                onAddAccount = {
+                                    viewModel.signIn(onOpenBrowser)
+                                    scope.launch { drawerState.close() }
+                                },
+                                onSwitchAccount = { viewModel.switchAccount(it) },
+                                onRemoveAccount = { viewModel.removeAccount(it) },
+                                onToggleAutoSwitch = { viewModel.toggleAutoSwitch() },
                                 onNewConversation = {
                                     viewModel.newConversation()
                                     scope.launch { drawerState.close() }

@@ -15,7 +15,7 @@ sealed class StreamEvent {
     data class ToolUse(val id: String, val name: String, val input: String) : StreamEvent()
     data class Usage(val inputTokens: Int, val outputTokens: Int) : StreamEvent()
     data class Retrying(val attempt: Int) : StreamEvent()
-    data class Failed(val message: String) : StreamEvent()
+    data class Failed(val message: String, val quotaExhausted: Boolean = false, val unauthorized: Boolean = false) : StreamEvent()
     object Done : StreamEvent()
 }
 
@@ -41,11 +41,12 @@ class InferenceClient(
         tools: List<ToolSpec>,
         maxTokens: Int,
         reasoning: Boolean,
+        tokenOverride: String? = null,
         onEvent: (StreamEvent) -> Unit
     ) {
-        val token = tokenProvider()
+        val token = tokenOverride ?: tokenProvider()
         if (token.isNullOrEmpty()) {
-            onEvent(StreamEvent.Failed("未登录，请先登录 DeepSeek 账号"))
+            onEvent(StreamEvent.Failed("未登录，请先登录 DeepSeek 账号", unauthorized = true))
             return
         }
         val body = JSONObject()
@@ -95,7 +96,11 @@ class InferenceClient(
                             retry = true
                             delay = backoffMs(attempt, resp.header("retry-after"))
                         } else {
-                            onEvent(StreamEvent.Failed(describeError(resp.code, text)))
+                            onEvent(StreamEvent.Failed(
+                                describeError(resp.code, text),
+                                quotaExhausted = isQuotaError(resp.code, text),
+                                unauthorized = resp.code == 401 || resp.code == 403
+                            ))
                             return
                         }
                     } else {
@@ -125,6 +130,17 @@ class InferenceClient(
     }
 
     private fun isRetryable(code: Int): Boolean = code == 429 || code == 408 || code >= 500
+
+    private fun isQuotaError(code: Int, text: String): Boolean {
+        if (code == 402) return true
+        val lower = text.lowercase()
+        return lower.contains("insufficient") ||
+            lower.contains("balance") ||
+            lower.contains("quota") ||
+            lower.contains("credit") ||
+            lower.contains("余额") ||
+            lower.contains("欠费")
+    }
 
     private fun backoffMs(attempt: Int, retryAfter: String?): Long {
         val fromHeader = retryAfter?.trim()?.toLongOrNull()

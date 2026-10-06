@@ -64,7 +64,7 @@ fun SignInScreen(
             )
             Spacer(Modifier.height(10.dp))
             Text(
-                "登录 DeepSeek 账号即可使用，新账号自带免费额度",
+                "登录 DeepSeek 账号即可使用，新账号自带免费额度\n可添加多个账号，额度用尽时自动切换",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center

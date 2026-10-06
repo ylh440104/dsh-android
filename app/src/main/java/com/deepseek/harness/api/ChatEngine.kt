@@ -10,12 +10,25 @@ interface MessageSink {
     fun update(index: Int, message: ChatMessage)
 }
 
+sealed class RunResult {
+    object Ok : RunResult()
+    data class QuotaExhausted(val message: String) : RunResult()
+    data class Unauthorized(val message: String) : RunResult()
+    data class Failed(val message: String) : RunResult()
+}
+
 class ChatEngine(
     private val inference: InferenceClient,
     private val tools: ToolRegistry
 ) {
 
-    fun run(model: String, history: List<ChatMessage>, sink: MessageSink, onFinished: () -> Unit) {
+    fun run(
+        model: String,
+        history: List<ChatMessage>,
+        sink: MessageSink,
+        token: String? = null,
+        onFinished: () -> Unit
+    ): RunResult {
         val messages = buildHistory(history)
         val specs = tools.specs()
         var round = 0
@@ -25,10 +38,10 @@ class ChatEngine(
             val textBuf = StringBuilder()
             val reasoningBuf = StringBuilder()
             val pendingTools = mutableListOf<StreamEvent.ToolUse>()
-            var failure: String? = null
+            var failure: StreamEvent.Failed? = null
 
             val index = sink.append(ChatMessage("assistant", ""))
-            inference.stream(model, SYSTEM_PROMPT, messages, specs, MAX_TOKENS, true) { event ->
+            inference.stream(model, SYSTEM_PROMPT, messages, specs, MAX_TOKENS, true, token) { event ->
                 when (event) {
                     is StreamEvent.Text -> {
                         textBuf.append(event.delta)
@@ -43,15 +56,20 @@ class ChatEngine(
                         index,
                         ChatMessage("assistant", textBuf.toString(), reasoningBuf.toString(), isRetrying = true)
                     )
-                    is StreamEvent.Failed -> failure = event.message
+                    is StreamEvent.Failed -> failure = event
                     else -> {}
                 }
             }
 
-            if (failure != null) {
-                sink.update(index, ChatMessage("assistant", failure!!, isError = true))
+            val failed = failure
+            if (failed != null) {
+                sink.update(index, ChatMessage("assistant", failed.message, isError = true))
                 onFinished()
-                return
+                return when {
+                    failed.quotaExhausted -> RunResult.QuotaExhausted(failed.message)
+                    failed.unauthorized -> RunResult.Unauthorized(failed.message)
+                    else -> RunResult.Failed(failed.message)
+                }
             }
 
             if (pendingTools.isEmpty()) {
@@ -59,7 +77,7 @@ class ChatEngine(
                     sink.update(index, ChatMessage("assistant", "模型未返回内容", isError = true))
                 }
                 onFinished()
-                return
+                return RunResult.Ok
             }
 
             val assistantBlocks = JSONArray()
@@ -104,6 +122,7 @@ class ChatEngine(
 
         sink.append(ChatMessage("assistant", "已达到工具调用轮次上限，请继续追问。", isError = true))
         onFinished()
+        return RunResult.Ok
     }
 
     private fun buildHistory(history: List<ChatMessage>): JSONArray {

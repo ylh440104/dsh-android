@@ -11,6 +11,11 @@ data class Balance(
 ) {
     fun normalText(): String = if (normal.isEmpty()) "--" else normal.joinToString("  ") { "${it.balance} ${it.currency}" }
     fun bonusText(): String = if (bonus.isEmpty()) "--" else bonus.joinToString("  ") { "${it.balance} ${it.currency}" }
+    fun normalTotal(): Double = normal.sumOf { it.balance.toDoubleOrNull() ?: 0.0 }
+    fun bonusTotal(): Double = bonus.sumOf { it.balance.toDoubleOrNull() ?: 0.0 }
+    fun total(): Double = normalTotal() + bonusTotal()
+    fun isExhausted(): Boolean = total() <= 0.0
+    fun totalText(): String = formatAmount(total())
 }
 
 data class Account(
@@ -19,6 +24,75 @@ data class Account(
     val contact: String? = null,
     val avatarUrl: String? = null
 )
+
+data class StoredAccount(
+    val localId: String,
+    val token: String,
+    var name: String? = null,
+    var contact: String? = null,
+    var avatarUrl: String? = null,
+    var remoteId: String? = null,
+    var normalText: String = "",
+    var bonusText: String = "",
+    var normalValue: Double = 0.0,
+    var bonusValue: Double = 0.0,
+    var quotaExhausted: Boolean = false,
+    var lastError: String? = null,
+    var lastUpdated: Long = 0L
+) {
+    val totalValue: Double get() = normalValue + bonusValue
+
+    val displayName: String
+        get() = name?.takeIf { it.isNotBlank() }
+            ?: contact?.takeIf { it.isNotBlank() }
+            ?: "DeepSeek 账号"
+
+    val balanceLine: String
+        get() = when {
+            lastError != null -> lastError!!
+            normalText.isBlank() && bonusText.isBlank() -> "额度未知"
+            bonusText.isBlank() -> normalText
+            else -> "$normalText  ·  赠送 $bonusText"
+        }
+
+    fun toJson(): JSONObject = JSONObject()
+        .put("localId", localId)
+        .put("name", name ?: "")
+        .put("contact", contact ?: "")
+        .put("avatarUrl", avatarUrl ?: "")
+        .put("remoteId", remoteId ?: "")
+        .put("normalText", normalText)
+        .put("bonusText", bonusText)
+        .put("normalValue", normalValue)
+        .put("bonusValue", bonusValue)
+        .put("quotaExhausted", quotaExhausted)
+        .put("lastUpdated", lastUpdated)
+
+    companion object {
+        fun fromJson(json: JSONObject, token: String): StoredAccount = StoredAccount(
+            localId = json.optString("localId", ""),
+            token = token,
+            name = json.optString("name", "").ifEmpty { null },
+            contact = json.optString("contact", "").ifEmpty { null },
+            avatarUrl = json.optString("avatarUrl", "").ifEmpty { null },
+            remoteId = json.optString("remoteId", "").ifEmpty { null },
+            normalText = json.optString("normalText", ""),
+            bonusText = json.optString("bonusText", ""),
+            normalValue = json.optDouble("normalValue", 0.0),
+            bonusValue = json.optDouble("bonusValue", 0.0),
+            quotaExhausted = json.optBoolean("quotaExhausted", false),
+            lastUpdated = json.optLong("lastUpdated", 0L)
+        )
+    }
+}
+
+fun formatAmount(value: Double): String {
+    if (value == 0.0) return "0"
+    return java.math.BigDecimal(value)
+        .setScale(2, java.math.RoundingMode.HALF_UP)
+        .stripTrailingZeros()
+        .toPlainString()
+}
 
 data class ChatMessage(
     val role: String,

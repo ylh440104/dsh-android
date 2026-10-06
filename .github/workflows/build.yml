@@ -87,6 +87,18 @@ jobs:
             grep -q "\"$t\"" $F || (echo "missing tool $t" && exit 1)
           done
           echo "tool surface present"
+      - name: Assert multi-account support present
+        run: |
+          test -f app/src/main/java/com/deepseek/harness/data/AccountStore.kt || (echo "account store missing" && exit 1)
+          test -f app/src/main/java/com/deepseek/harness/data/SecretBox.kt || (echo "secret box missing" && exit 1)
+          grep -q 'pickNextAccount' app/src/main/java/com/deepseek/harness/ui/AppViewModel.kt
+          grep -q 'switchAccount' app/src/main/java/com/deepseek/harness/ui/AppViewModel.kt
+          grep -q 'autoSwitch' app/src/main/java/com/deepseek/harness/ui/AppViewModel.kt
+          grep -q 'totalBalanceText' app/src/main/java/com/deepseek/harness/ui/AppViewModel.kt
+          grep -q 'RunResult.QuotaExhausted' app/src/main/java/com/deepseek/harness/ui/AppViewModel.kt
+          grep -q 'quotaExhausted' app/src/main/java/com/deepseek/harness/model/Models.kt
+          grep -q 'AccountRow' app/src/main/java/com/deepseek/harness/ui/AppDrawer.kt
+          echo "multi-account present"
       - name: Assert markdown renderer present
         run: |
           test -f app/src/main/java/com/deepseek/harness/ui/md/MarkdownParser.kt || (echo "markdown parser missing" && exit 1)

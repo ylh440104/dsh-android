@@ -26,6 +26,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -35,14 +36,14 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.deepseek.harness.model.Conversation
+import com.deepseek.harness.model.StoredAccount
 
 @Composable
 fun AppDrawer(
-    accountName: String,
-    accountContact: String,
-    balanceText: String,
-    bonusText: String,
-    balanceError: String?,
+    accounts: List<StoredAccount>,
+    activeId: String?,
+    totalBalanceText: String,
+    autoSwitch: Boolean,
     loadingBalance: Boolean,
     conversations: List<Conversation>,
     currentId: String?,
@@ -50,6 +51,10 @@ fun AppDrawer(
     shizukuRunning: Boolean,
     shizukuGranted: Boolean,
     storageGranted: Boolean,
+    onAddAccount: () -> Unit,
+    onSwitchAccount: (String) -> Unit,
+    onRemoveAccount: (String) -> Unit,
+    onToggleAutoSwitch: () -> Unit,
     onNewConversation: () -> Unit,
     onOpenConversation: (String) -> Unit,
     onDeleteConversation: (String) -> Unit,
@@ -62,83 +67,22 @@ fun AppDrawer(
     Surface(
         modifier = Modifier
             .fillMaxHeight()
-            .width(300.dp),
+            .width(310.dp),
         color = MaterialTheme.colorScheme.surface
     ) {
         Column(modifier = Modifier.fillMaxHeight()) {
-            Column(modifier = Modifier.padding(horizontal = 18.dp, vertical = 20.dp)) {
-                Text(
-                    accountName,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                if (accountContact.isNotEmpty()) {
-                    Spacer(Modifier.height(2.dp))
-                    Text(
-                        accountContact,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-                Spacer(Modifier.height(14.dp))
-                Surface(
-                    color = MaterialTheme.colorScheme.surfaceVariant,
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                "账户余额",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Spacer(Modifier.width(6.dp))
-                            if (loadingBalance) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(11.dp),
-                                    strokeWidth = 1.5.dp,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                            } else {
-                                Icon(
-                                    Icons.Default.Refresh,
-                                    contentDescription = "刷新",
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier
-                                        .size(14.dp)
-                                        .clickable { onRefresh() }
-                                )
-                            }
-                        }
-                        Spacer(Modifier.height(6.dp))
-                        Text(
-                            balanceText,
-                            style = MaterialTheme.typography.bodyLarge,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            "赠送额度 $bonusText",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        if (balanceError != null) {
-                            Spacer(Modifier.height(4.dp))
-                            Text(
-                                balanceError,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.error
-                            )
-                        }
-                    }
-                }
-            }
+            AccountPanel(
+                accounts = accounts,
+                activeId = activeId,
+                totalBalanceText = totalBalanceText,
+                autoSwitch = autoSwitch,
+                loadingBalance = loadingBalance,
+                onAddAccount = onAddAccount,
+                onSwitchAccount = onSwitchAccount,
+                onRemoveAccount = onRemoveAccount,
+                onToggleAutoSwitch = onToggleAutoSwitch,
+                onRefresh = onRefresh
+            )
 
             Divider(color = MaterialTheme.colorScheme.surfaceVariant)
 
@@ -196,10 +140,213 @@ fun AppDrawer(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    "退出登录",
+                    "退出全部账号",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.error
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun AccountPanel(
+    accounts: List<StoredAccount>,
+    activeId: String?,
+    totalBalanceText: String,
+    autoSwitch: Boolean,
+    loadingBalance: Boolean,
+    onAddAccount: () -> Unit,
+    onSwitchAccount: (String) -> Unit,
+    onRemoveAccount: (String) -> Unit,
+    onToggleAutoSwitch: () -> Unit,
+    onRefresh: () -> Unit
+) {
+    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 16.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "账号",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f)
+            )
+            if (loadingBalance) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(13.dp),
+                    strokeWidth = 1.5.dp,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            } else {
+                Icon(
+                    Icons.Default.Refresh,
+                    contentDescription = "刷新额度",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .size(15.dp)
+                        .clickable { onRefresh() }
+                )
+            }
+            Spacer(Modifier.width(14.dp))
+            Icon(
+                Icons.Default.Add,
+                contentDescription = "添加账号",
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier
+                    .size(18.dp)
+                    .clickable { onAddAccount() }
+            )
+        }
+
+        Spacer(Modifier.height(10.dp))
+
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceVariant,
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
+                Text(
+                    "总额度",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    totalBalanceText,
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    "共 ${accounts.size} 个账号",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+
+        Spacer(Modifier.height(10.dp))
+
+        for (account in accounts) {
+            AccountRow(
+                account = account,
+                active = account.localId == activeId,
+                canRemove = accounts.size > 1,
+                onSwitch = { onSwitchAccount(account.localId) },
+                onRemove = { onRemoveAccount(account.localId) }
+            )
+            Spacer(Modifier.height(6.dp))
+        }
+
+        Spacer(Modifier.height(2.dp))
+
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    "额度用尽自动切换",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    if (autoSwitch) "用尽后自动使用下一个账号" else "已关闭，用尽后停止",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Switch(checked = autoSwitch, onCheckedChange = { onToggleAutoSwitch() })
+        }
+    }
+}
+
+@Composable
+private fun AccountRow(
+    account: StoredAccount,
+    active: Boolean,
+    canRemove: Boolean,
+    onSwitch: () -> Unit,
+    onRemove: () -> Unit
+) {
+    val border = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant
+    Surface(
+        color = MaterialTheme.colorScheme.surface,
+        shape = RoundedCornerShape(10.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, border),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onSwitch() }
+    ) {
+        Row(
+            modifier = Modifier.padding(start = 12.dp, end = 6.dp, top = 10.dp, bottom = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(8.dp)
+                    .background(
+                        when {
+                            active -> MaterialTheme.colorScheme.primary
+                            account.quotaExhausted -> MaterialTheme.colorScheme.error
+                            else -> MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                        RoundedCornerShape(4.dp)
+                    )
+            )
+            Spacer(Modifier.width(10.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        account.displayName,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
+                    )
+                    if (active) {
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            "当前",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    if (account.quotaExhausted) {
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            "已用尽",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+                }
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    account.balanceLine,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (account.lastError != null) MaterialTheme.colorScheme.error
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+                if (account.totalValue > 0) {
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        "合计 ${com.deepseek.harness.model.formatAmount(account.totalValue)}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            if (canRemove) {
+                IconButton(onClick = onRemove) {
+                    Icon(
+                        Icons.Default.Delete,
+                        contentDescription = "移除账号",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
             }
         }
     }

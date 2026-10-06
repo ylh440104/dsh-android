@@ -1,208 +1,20 @@
 name: Build and Verify
-
 on:
   push:
     tags:
       - 'v*'
   workflow_dispatch:
-
 permissions:
   contents: write
-
 jobs:
-  build-runtime:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-
-      - name: Install tools
-        run: sudo apt-get install -y p7zip-full xz-utils patchelf
-
-      - name: Download original Windows installer
-        run: curl -L -o dsh-installer.exe "https://download.deepseek.com/dsh-desk/bin/win-x64/deepseek-harness-0.2.0-rc.1-win-x64.exe"
-
-      - name: Extract NSIS installer
-        run: |
-          mkdir -p nsis_extract && cd nsis_extract
-          7z x ../dsh-installer.exe -y
-          mkdir -p app_extract && cd app_extract
-          7z x '../$PLUGINSDIR/app-64.7z' -y
-
-      - name: Extract app.asar
-        run: |
-          mkdir -p asar_extract
-          npx @electron/asar extract nsis_extract/app_extract/resources/app.asar asar_extract
-          cp -r nsis_extract/app_extract/resources/app.asar.unpacked asar_extract/app.asar.unpacked
-          cp -r nsis_extract/app_extract/resources/runtime asar_extract/runtime
-
-      - name: Download Termux bootstrap and node packages
-        run: |
-          curl -sL "https://github.com/termux/termux-packages/releases/latest/download/bootstrap-aarch64.zip" -o bs-arm64.zip
-          curl -sL "https://github.com/termux/termux-packages/releases/latest/download/bootstrap-x86_64.zip" -o bs-x86_64.zip
-          mkdir -p bs_arm64 bs_x86_64
-          unzip -q bs-arm64.zip -d bs_arm64
-          unzip -q bs-x86_64.zip -d bs_x86_64
-          ls bs_arm64/lib | head -5
-          echo "bootstrap arm64 libs: $(ls bs_arm64/lib | wc -l)"
-
-      - name: Download node and deps debs
-        run: |
-          mkdir -p debs
-          cd debs
-          BASE="https://packages.termux.dev/apt/termux-main/pool/main"
-          fetch() {
-            name="$1"
-            path="$2"
-            curl -sL "$BASE/$path" -o "$name.deb"
-            mkdir -p "$name"
-            dpkg-deb -x "$name.deb" "$name"
-            echo "$name: $(stat -c%s $name.deb) bytes"
-          }
-          fetch node-arm64 n/nodejs/nodejs_26.4.0-1_aarch64.deb
-          fetch node-x86 n/nodejs/nodejs_26.4.0-1_x86_64.deb
-          fetch icu-arm64 libi/libicu/libicu_78.3_aarch64.deb
-          fetch icu-x86 libi/libicu/libicu_78.3_x86_64.deb
-          fetch sqlite-arm64 libs/libsqlite/libsqlite_3.53.4_aarch64.deb
-          fetch sqlite-x86 libs/libsqlite/libsqlite_3.53.4_x86_64.deb
-          fetch cares-arm64 c/c-ares/c-ares_1.34.8_aarch64.deb
-          fetch cares-x86 c/c-ares/c-ares_1.34.8_x86_64.deb
-          cd ..
-
-      - name: Build node-arm64
-        run: |
-          mkdir -p out/node-arm64
-          cp -r bs_arm64/. out/node-arm64/
-          cp -r debs/node-arm64/data/data/com.termux/files/usr/. out/node-arm64/
-          cp -r debs/icu-arm64/data/data/com.termux/files/usr/. out/node-arm64/
-          cp -r debs/sqlite-arm64/data/data/com.termux/files/usr/. out/node-arm64/
-          cp -r debs/cares-arm64/data/data/com.termux/files/usr/. out/node-arm64/
-          python3 tools/fixlibs.py out/node-arm64
-          patchelf --set-interpreter /system/bin/linker64 out/node-arm64/bin/node || true
-          patchelf --set-rpath '\$ORIGIN/../lib' out/node-arm64/bin/node || true
-          chmod +x out/node-arm64/bin/node
-          cd out/node-arm64 && tar -cf ../../node-arm64.tar . && cd ../..
-          xz -9 -T 0 node-arm64.tar
-          echo "node-arm64.tar.xz: $(stat -c%s node-arm64.tar.xz) bytes"
-
-      - name: Build node-x86_64
-        run: |
-          mkdir -p out/node-x86_64
-          cp -r bs_x86_64/. out/node-x86_64/
-          cp -r debs/node-x86/data/data/com.termux/files/usr/. out/node-x86_64/
-          cp -r debs/icu-x86/data/data/com.termux/files/usr/. out/node-x86_64/
-          cp -r debs/sqlite-x86/data/data/com.termux/files/usr/. out/node-x86_64/
-          cp -r debs/cares-x86/data/data/com.termux/files/usr/. out/node-x86_64/
-          python3 tools/fixlibs.py out/node-x86_64
-          patchelf --set-interpreter /system/bin/linker64 out/node-x86_64/bin/node || true
-          patchelf --set-rpath '\$ORIGIN/../lib' out/node-x86_64/bin/node || true
-          chmod +x out/node-x86_64/bin/node
-          cd out/node-x86_64 && tar -cf ../../node-x86_64.tar . && cd ../..
-          xz -9 -T 0 node-x86_64.tar
-          echo "node-x86_64.tar.xz: $(stat -c%s node-x86_64.tar.xz) bytes"
-
-      - name: Fetch linux native addons from npm
-        run: |
-          mkdir -p nat
-          cd nat
-          for pkg in node-addon-require-builtin-linux-arm64-gnu node-addon-require-builtin-linux-x64-gnu; do
-            ver=$(curl -s "https://registry.npmjs.org/$pkg" | python3 -c "import json,sys; print(json.load(sys.stdin)['dist-tags']['latest'])")
-            url="https://registry.npmjs.org/$pkg/-/$pkg-$ver.tgz"
-            echo "fetch $pkg@$ver"
-            curl -sL "$url" -o "$pkg.tgz"
-            mkdir -p "$pkg"
-            tar xzf "$pkg.tgz" -C "$pkg" --strip-components=1
-          done
-          ls -R .
-          cd ..
-
-      - name: Package runtime
-        run: |
-          mkdir -p out/runtime
-          cp -r asar_extract/dsh/* out/runtime/
-          cp -rn asar_extract/app.asar.unpacked/dsh/node_modules/* out/runtime/node_modules/ 2>/dev/null || true
-          cp -r asar_extract/runtime/* out/runtime/
-          cp -r nat/node-addon-require-builtin-linux-arm64-gnu out/runtime/node_modules/ 2>/dev/null || true
-          cp -r nat/node-addon-require-builtin-linux-x64-gnu out/runtime/node_modules/ 2>/dev/null || true
-          echo "=== native addons in runtime ==="
-          ls out/runtime/node_modules/ | grep node-addon || true
-          find out/runtime/node_modules/node-addon-require-builtin-linux-arm64-gnu -name '*.node' 2>/dev/null || true
-          cd out/runtime && tar -cf ../../runtime.tar . && cd ../..
-          xz -9 -T 0 runtime.tar
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: runtime-assets
-          path: |
-            node-arm64.tar.xz
-            node-x86_64.tar.xz
-            runtime.tar.xz
-          retention-days: 1
-
-  verify-extract:
-    needs: build-runtime
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: '17'
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: runtime-assets
-          path: ./assets
-
-      - name: Download xz jar
-        run: curl -L -o xz.jar "https://repo1.maven.org/maven2/org/tukaani/xz/1.10/xz-1.10.jar"
-
-      - name: Compile extractor
-        run: |
-          mkdir -p classes
-          javac -d classes app/src/main/java/com/deepseek/harness/Tar.java
-          javac -cp classes:xz.jar -d classes tools/TestExtract.java
-
-      - name: Verify node-arm64 archive
-        run: |
-          java -cp classes:xz.jar TestExtract assets/node-arm64.tar.xz /tmp/n1
-          test -f /tmp/n1/bin/node || (echo "MISSING node-arm64/bin/node" && exit 1)
-          ls -la /tmp/n1/bin/node
-          echo "node-arm64 OK"
-
-      - name: Verify node-x86_64 archive
-        run: |
-          java -cp classes:xz.jar TestExtract assets/node-x86_64.tar.xz /tmp/n2
-          test -f /tmp/n2/bin/node || (echo "MISSING node-x86_64/bin/node" && exit 1)
-          echo "node-x86_64 OK"
-
-      - name: Verify runtime archive
-        run: |
-          java -cp classes:xz.jar TestExtract assets/runtime.tar.xz /tmp/r1
-          test -f /tmp/r1/node_modules/@deepseek-ai/dsh-desktop-host/lib/index.js || (echo "MISSING host entry" && exit 1)
-          echo "host entry OK"
-          test -d /tmp/r1/node_modules/@deepseek-ai/dsh-base || (echo "MISSING dsh-base" && exit 1)
-          echo "dsh-base OK"
-          test -d /tmp/r1/node_modules/@deepseek-ai/dsh-web-app || (echo "MISSING dsh-web-app" && exit 1)
-          echo "dsh-web-app OK"
-          ls /tmp/r1/node_modules/@deepseek-ai/ | head -30
-          echo "runtime OK"
-
   build-apk:
-    needs: verify-extract
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
-
       - name: Setup Android SDK
         run: |
           export ANDROID_HOME=$HOME/android-sdk
@@ -219,145 +31,79 @@ jobs:
           echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> $GITHUB_ENV
           echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> $GITHUB_PATH
           echo "$ANDROID_HOME/platform-tools" >> $GITHUB_PATH
-
       - uses: gradle/actions/setup-gradle@v3
-
+        with:
+          gradle-version: '8.9'
       - name: Build APK
         run: |
           echo "sdk.dir=$ANDROID_HOME" > local.properties
           gradle assembleDebug --no-daemon --stacktrace
-
-      - uses: actions/upload-artifact@v4
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
         with:
           name: dsh-apk
           path: app/build/outputs/apk/debug/*.apk
           retention-days: 30
 
-  e2e-test:
-    needs: [build-apk, verify-extract]
+  verify-protocol:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: '17'
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: runtime-assets
-          path: ./assets
-
-      - name: Download xz jar
-        run: curl -L -o xz.jar "https://repo1.maven.org/maven2/org/tukaani/xz/1.10/xz-1.10.jar"
-
-      - name: Compile extractor
+      - name: Check no comments in Kotlin sources
         run: |
-          mkdir -p classes
-          javac -d classes app/src/main/java/com/deepseek/harness/Tar.java
-          javac -cp classes:xz.jar -d classes tools/TestExtract.java
-
-      - name: Extract runtime with app code
-        run: |
-          rm -rf home && mkdir -p home
-          java -cp classes:xz.jar TestExtract assets/runtime.tar.xz home
-
-      - name: Setup node
-        run: |
-          case "$(uname -m)" in
-            x86_64) NARCH=x64 ;;
-            aarch64|arm64) NARCH=arm64 ;;
-            *) NARCH=x64 ;;
-          esac
-          curl -fL -o node.tar.xz "https://nodejs.org/dist/v24.18.1/node-v24.18.1-linux-$NARCH.tar.xz"
-          mkdir -p nodehome && tar xf node.tar.xz -C nodehome --strip-components=1
-          nodehome/bin/node -v
-
-      - name: Prepare profile
-        run: |
-          mkdir -p home/profiles/desktop
-          printf '%s' '{"name":"desktop","private":true,"type":"module","dsh":{"profile":{"bundles":["@deepseek-ai/dsh-base","@deepseek-ai/dsh-web-app"]}}}' > home/profiles/desktop/package.json
-          printf '[]\n' > home/profiles/desktop/cordis.patch.yml
-
-      - name: Assert native addons present
-        run: |
-          ls home/node_modules/ | grep node-addon-require-builtin
-          ARCH=$(uname -m)
-          if [ "$ARCH" = "x86_64" ]; then PKG=linux-x64-gnu; else PKG=linux-arm64-gnu; fi
-          find home/node_modules/node-addon-require-builtin-$PKG -name '*.node' | grep .
-          echo "native addon for $PKG present"
-
-      - name: Start host and verify web server
-        run: |
-          cd home/profiles/desktop
-          export DSH_HOME=$PWD/../..
-          nohup sh -c 'exec $GITHUB_WORKSPACE/nodehome/bin/node --expose-internals \
-            $GITHUB_WORKSPACE/home/node_modules/@deepseek-ai/dsh-desktop-host/lib/index.js \
-            $GITHUB_WORKSPACE/home \
-            $GITHUB_WORKSPACE/home/profiles/desktop \
-            $GITHUB_WORKSPACE/home/primary-runtime' > $GITHUB_WORKSPACE/host.log 2>&1 &
-          echo "waiting for host..."
-          for i in $(seq 1 60); do
-            if grep -q "dsh web: http" $GITHUB_WORKSPACE/host.log 2>/dev/null; then
-              echo "host is up after ${i}0s"
-              break
+          fail=0
+          while IFS= read -r file; do
+            if grep -qE '^\s*//|/\*|\*/' "$file"; then
+              echo "comment found in $file"
+              fail=1
             fi
-            sleep 10
-          done
-          echo "=== host log ==="
-          cat $GITHUB_WORKSPACE/host.log
-          grep -q "dsh web: http" $GITHUB_WORKSPACE/host.log || (echo "HOST DID NOT START" && exit 1)
-
-      - name: Verify web UI responds
+          done < <(find app/src/main/java -name '*.kt')
+          if [ "$fail" -ne 0 ]; then exit 1; fi
+          echo "no comments found"
+      - name: Assert protocol constants present
         run: |
-          TOKEN=$(grep -o 'token=[A-Za-z0-9_-]*' $GITHUB_WORKSPACE/host.log | tail -1 | cut -d= -f2)
-          echo "token=$TOKEN"
-          curl -s -c /tmp/ck -o /dev/null "http://127.0.0.1:19387/?token=$TOKEN"
-          BODY=$(curl -s -b /tmp/ck "http://127.0.0.1:19387/")
-          echo "$BODY" | head -c 500
-          echo ""
-          echo "$BODY" | grep -q "__DSH_CONTACT_CONFIG__" || (echo "WEB UI INVALID" && exit 1)
-          echo "WEB UI VERIFIED"
-
-      - name: Upload host log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: host-log
-          path: host.log
-          if-no-files-found: ignore
+          F=app/src/main/java/com/deepseek/harness/api/PlatformClient.kt
+          grep -q 'auth-api/v0/dsh/auth_init' $F
+          grep -q 'auth-api/v0/dsh/auth_exchange' $F
+          grep -q 'api/v0/users/get_user_summary' $F
+          grep -q 'auth-api/v0/users/current' $F
+          echo "platform endpoints present"
+          I=app/src/main/java/com/deepseek/harness/api/InferenceClient.kt
+          grep -q 'anthropic/v1/messages' $I
+          grep -q 'x-dsh-auth-token' $I
+          grep -q 'anthropic-version' $I
+          echo "inference endpoints present"
+      - name: Assert PKCE implemented
+        run: |
+          F=app/src/main/java/com/deepseek/harness/auth/Pkce.kt
+          grep -q 'SHA-256' $F
+          grep -q 'URL_SAFE' $F
+          echo "pkce present"
+      - name: Assert no bundled runtime leftovers
+        run: |
+          if [ -d tools ]; then echo "tools dir should be gone"; exit 1; fi
+          if [ -f app/src/main/java/com/deepseek/harness/NodeLauncher.java ]; then echo "NodeLauncher should be gone"; exit 1; fi
+          if grep -rq 'xz' app/build.gradle; then echo "xz dependency should be gone"; exit 1; fi
+          echo "runtime leftovers absent"
 
   release:
-    needs: [build-apk, e2e-test]
+    needs: [build-apk, verify-protocol]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/download-artifact@v4
         with:
           name: dsh-apk
           path: ./apk
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: runtime-assets
-          path: ./assets
-
       - name: Delete existing release
         run: gh release delete ${{ github.ref_name }} --yes --cleanup-tag || true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
           name: ${{ github.ref_name }}
-          files: |
-            assets/runtime.tar.xz
-            assets/node-arm64.tar.xz
-            assets/node-x86_64.tar.xz
-            apk/*.apk
+          files: apk/*.apk
           draft: false
           prerelease: true

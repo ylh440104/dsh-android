@@ -46,10 +46,17 @@ fun AppDrawer(
     loadingBalance: Boolean,
     conversations: List<Conversation>,
     currentId: String?,
+    shizukuInstalled: Boolean,
+    shizukuRunning: Boolean,
+    shizukuGranted: Boolean,
+    storageGranted: Boolean,
     onNewConversation: () -> Unit,
     onOpenConversation: (String) -> Unit,
     onDeleteConversation: (String) -> Unit,
     onRefresh: () -> Unit,
+    onRequestShizuku: () -> Unit,
+    onInstallShizuku: () -> Unit,
+    onRequestStorage: () -> Unit,
     onSignOut: () -> Unit
 ) {
     Surface(
@@ -132,6 +139,18 @@ fun AppDrawer(
                     }
                 }
             }
+
+            Divider(color = MaterialTheme.colorScheme.surfaceVariant)
+
+            PermissionPanel(
+                shizukuInstalled = shizukuInstalled,
+                shizukuRunning = shizukuRunning,
+                shizukuGranted = shizukuGranted,
+                storageGranted = storageGranted,
+                onRequestShizuku = onRequestShizuku,
+                onInstallShizuku = onInstallShizuku,
+                onRequestStorage = onRequestStorage
+            )
 
             Divider(color = MaterialTheme.colorScheme.surfaceVariant)
 
@@ -229,6 +248,91 @@ private fun ConversationRow(
 }
 
 @Composable
+private fun PermissionPanel(
+    shizukuInstalled: Boolean,
+    shizukuRunning: Boolean,
+    shizukuGranted: Boolean,
+    storageGranted: Boolean,
+    onRequestShizuku: () -> Unit,
+    onInstallShizuku: () -> Unit,
+    onRequestStorage: () -> Unit
+) {
+    Column(modifier = Modifier.padding(horizontal = 18.dp, vertical = 14.dp)) {
+        Text(
+            "权限",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(Modifier.height(10.dp))
+        PermissionRow(
+            label = "存储访问",
+            detail = if (storageGranted) "已授权，可读写 /sdcard" else "未授权，仅能访问应用私有目录",
+            granted = storageGranted,
+            actionText = if (storageGranted) null else "去授权",
+            onAction = onRequestStorage
+        )
+        Spacer(Modifier.height(8.dp))
+        PermissionRow(
+            label = "Shizuku",
+            detail = when {
+                shizukuGranted -> "已授权，可执行提权命令"
+                shizukuRunning -> "服务已运行，等待授权"
+                shizukuInstalled -> "已安装，服务未启动"
+                else -> "未安装"
+            },
+            granted = shizukuGranted,
+            actionText = when {
+                shizukuGranted -> null
+                shizukuRunning -> "授权"
+                else -> "打开"
+            },
+            onAction = if (shizukuRunning) onRequestShizuku else onInstallShizuku
+        )
+    }
+}
+
+@Composable
+private fun PermissionRow(
+    label: String,
+    detail: String,
+    granted: Boolean,
+    actionText: String?,
+    onAction: () -> Unit
+) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            modifier = Modifier
+                .size(7.dp)
+                .background(
+                    if (granted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    RoundedCornerShape(4.dp)
+                )
+        )
+        Spacer(Modifier.width(8.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                label,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Text(
+                detail,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        if (actionText != null) {
+            Text(
+                actionText,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.clickable { onAction() }
+            )
+        }
+    }
+}
+
+@Composable
 fun EmptyConversationHint() {
     Box(
         modifier = Modifier.fillMaxWidth(),
@@ -246,7 +350,7 @@ fun EmptyConversationHint() {
                 color = MaterialTheme.colorScheme.onSurface
             )
             Text(
-                "可以直接提问，也可以让它读写工作区里的文件",
+                "可以直接提问，也可以让它读写 /sdcard 里的文件",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

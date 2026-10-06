@@ -18,14 +18,17 @@ import com.deepseek.harness.model.BUILTIN_MODELS
 import com.deepseek.harness.model.ChatMessage
 import com.deepseek.harness.model.Conversation
 import com.deepseek.harness.model.ModelInfo
+import com.deepseek.harness.shell.ShizukuManager
 import com.deepseek.harness.tools.ToolRegistry
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import java.io.File
+import kotlin.coroutines.resume
 
 data class UiState(
     val signedIn: Boolean = false,
@@ -40,7 +43,11 @@ data class UiState(
     val info: String? = null,
     val model: String = "deepseek-flash",
     val showReasoning: Boolean = false,
-    val signingIn: Boolean = false
+    val signingIn: Boolean = false,
+    val shizukuInstalled: Boolean = false,
+    val shizukuRunning: Boolean = false,
+    val shizukuGranted: Boolean = false,
+    val storageGranted: Boolean = false
 )
 
 class AppViewModel(app: Application) : AndroidViewModel(app) {
@@ -71,6 +78,66 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (!token.isNullOrEmpty()) {
             refreshAccount()
         }
+        refreshPermissions()
+    }
+
+    fun refreshPermissions() {
+        val context = getApplication<Application>()
+        _state.value = _state.value.copy(
+            shizukuInstalled = ShizukuManager.isInstalled(context),
+            shizukuRunning = ShizukuManager.isRunning(),
+            shizukuGranted = ShizukuManager.hasPermission(),
+            storageGranted = hasStorageAccess(context)
+        )
+    }
+
+    private fun hasStorageAccess(context: android.content.Context): Boolean =
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+            android.os.Environment.isExternalStorageManager()
+        } else {
+            context.checkSelfPermission(android.Manifest.permission.WRITE_EXTERNAL_STORAGE) ==
+                android.content.pm.PackageManager.PERMISSION_GRANTED
+        }
+
+    fun requestShizukuPermission() {
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                suspendCancellableCoroutine<Boolean> { cont ->
+                    ShizukuManager.requestPermission { granted -> cont.resume(granted) }
+                }
+            }
+            _state.value = _state.value.copy(
+                shizukuGranted = result,
+                info = if (result) "Shizuku 权限已授予" else "Shizuku 权限被拒绝"
+            )
+            refreshPermissions()
+        }
+    }
+
+    fun openShizukuInstall() {
+        val context = getApplication<Application>()
+        val intent = context.packageManager.getLaunchIntentForPackage(SHIZUKU_PACKAGE)
+        val target = intent ?: android.content.Intent(
+            android.content.Intent.ACTION_VIEW,
+            android.net.Uri.parse("https://shizuku.rikka.app/download/")
+        )
+        target.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        runCatching { context.startActivity(target) }
+            .onFailure { _state.value = _state.value.copy(error = "无法打开 Shizuku") }
+    }
+
+    fun requestStorageAccess() {
+        val context = getApplication<Application>()
+        val intent = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+            android.content.Intent(android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION)
+                .setData(android.net.Uri.parse("package:${context.packageName}"))
+        } else {
+            android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                .setData(android.net.Uri.parse("package:${context.packageName}"))
+        }
+        intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        runCatching { context.startActivity(intent) }
+            .onFailure { _state.value = _state.value.copy(error = "无法打开系统设置") }
     }
 
     fun dismissMessages() {
@@ -295,4 +362,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private fun deviceModel(): String = "android-${android.os.Build.MODEL}"
 
     private fun osVersion(): String = "Android ${android.os.Build.VERSION.RELEASE}"
+
+    companion object {
+        private const val SHIZUKU_PACKAGE = "moe.shizuku.privileged.api"
+    }
 }

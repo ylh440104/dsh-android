@@ -8,12 +8,22 @@ class FileTools(private val workspace: File) {
         if (!workspace.exists()) workspace.mkdirs()
     }
 
-    fun listFiles(path: String): ToolOutcome {
-        val target = if (path.isBlank()) workspace.canonicalFile else PathGuard.resolve(workspace, path)
-            ?: return PathGuard.outside(path)
-        if (!target.exists()) return ToolOutcome.Err("No such directory: $path")
-        if (!target.isDirectory) return ToolOutcome.Err("Not a directory: $path")
-        val entries = target.listFiles()?.sortedWith(compareBy({ !it.isDirectory }, { it.name.lowercase() }))
+    private fun resolve(raw: String): File = PathGuard.toFile(workspace, PathGuard.normalize(raw))
+
+    private fun blocked(path: String): ToolOutcome.Err? =
+        if (PathGuard.isProtected(path)) {
+            ToolOutcome.Err("Refusing to touch protected system path: $path")
+        } else {
+            null
+        }
+
+    fun listFiles(raw: String): ToolOutcome {
+        val path = PathGuard.normalize(raw)
+        blocked(path)?.let { return it }
+        val dir = resolve(raw)
+        if (!dir.exists()) return ToolOutcome.Err("No such directory: $path")
+        if (!dir.isDirectory) return ToolOutcome.Err("Not a directory: $path")
+        val entries = dir.listFiles()?.sortedWith(compareBy({ !it.isDirectory }, { it.name.lowercase() }))
             ?: return ToolOutcome.Err("Cannot read directory: $path")
         if (entries.isEmpty()) return ToolOutcome.Ok("(empty directory) $path")
         val sb = StringBuilder()
@@ -27,9 +37,9 @@ class FileTools(private val workspace: File) {
         return ToolOutcome.Ok(sb.toString().trimEnd())
     }
 
-    fun readFile(path: String, startLine: Int, endLine: Int): ToolOutcome {
-        PathGuard.requirePath(path)?.let { return it }
-        val file = PathGuard.resolve(workspace, path) ?: return PathGuard.outside(path)
+    fun readFile(raw: String, startLine: Int, endLine: Int): ToolOutcome {
+        val path = PathGuard.normalize(raw)
+        val file = resolve(raw)
         if (!file.exists()) return ToolOutcome.Err("No such file: $path")
         if (file.isDirectory) return ToolOutcome.Err("'$path' is a directory, use list_files instead")
         if (file.length() > MAX_BYTES) {
@@ -42,10 +52,10 @@ class FileTools(private val workspace: File) {
         }
         val lines = text.split('\n')
         val from = startLine.coerceAtLeast(1)
-        val to = endLine.coerceAtMost(lines.size)
         if (from > lines.size) {
             return ToolOutcome.Err("start_line $from is beyond end of file (${lines.size} lines)")
         }
+        val to = endLine.coerceAtMost(lines.size)
         if (to < from) return ToolOutcome.Err("end_line must be >= start_line")
         val sb = StringBuilder()
         sb.append("Content of $path (lines $from-$to of ${lines.size}):\n")
@@ -55,9 +65,10 @@ class FileTools(private val workspace: File) {
         return ToolOutcome.Ok(sb.toString().trimEnd())
     }
 
-    fun writeFile(path: String, content: String): ToolOutcome {
-        PathGuard.requirePath(path)?.let { return it }
-        val file = PathGuard.resolve(workspace, path) ?: return PathGuard.outside(path)
+    fun writeFile(raw: String, content: String): ToolOutcome {
+        val path = PathGuard.normalize(raw)
+        blocked(path)?.let { return it }
+        val file = resolve(raw)
         if (file.isDirectory) return ToolOutcome.Err("'$path' is a directory")
         return try {
             file.parentFile?.mkdirs()
@@ -68,9 +79,10 @@ class FileTools(private val workspace: File) {
         }
     }
 
-    fun applyEdit(path: String, oldText: String, newText: String): ToolOutcome {
-        PathGuard.requirePath(path)?.let { return it }
-        val file = PathGuard.resolve(workspace, path) ?: return PathGuard.outside(path)
+    fun applyEdit(raw: String, oldText: String, newText: String): ToolOutcome {
+        val path = PathGuard.normalize(raw)
+        blocked(path)?.let { return it }
+        val file = resolve(raw)
         if (!file.exists()) return ToolOutcome.Err("No such file: $path. Use create_file to create it.")
         if (file.isDirectory) return ToolOutcome.Err("'$path' is a directory")
         if (oldText.isEmpty()) return ToolOutcome.Err("'old' must not be empty")
@@ -86,9 +98,8 @@ class FileTools(private val workspace: File) {
         if (text.indexOf(oldText, first + 1) >= 0) {
             return ToolOutcome.Err("'old' text appears more than once in $path. Include more surrounding context to make it unique.")
         }
-        val updated = text.replaceFirst(oldText, newText)
         return try {
-            file.writeText(updated)
+            file.writeText(text.replaceFirst(oldText, newText))
             val line = text.substring(0, first).count { it == '\n' } + 1
             ToolOutcome.Ok("Edited $path at line $line (${oldText.length} -> ${newText.length} chars)")
         } catch (e: Exception) {
@@ -96,19 +107,19 @@ class FileTools(private val workspace: File) {
         }
     }
 
-    fun createFile(path: String, content: String): ToolOutcome {
-        PathGuard.requirePath(path)?.let { return it }
-        val file = PathGuard.resolve(workspace, path) ?: return PathGuard.outside(path)
+    fun createFile(raw: String, content: String): ToolOutcome {
+        val path = PathGuard.normalize(raw)
+        blocked(path)?.let { return it }
+        val file = resolve(raw)
         if (file.exists()) return ToolOutcome.Err("File already exists: $path. Use edit_file to modify it.")
-        return writeFile(path, content)
+        return writeFile(raw, content)
     }
 
-    fun deleteFile(path: String, recursive: Boolean): ToolOutcome {
-        PathGuard.requirePath(path)?.let { return it }
-        val file = PathGuard.resolve(workspace, path) ?: return PathGuard.outside(path)
-        if (file.canonicalFile.path == workspace.canonicalFile.path) {
-            return ToolOutcome.Err("Refusing to delete the workspace root")
-        }
+    fun deleteFile(raw: String, recursive: Boolean): ToolOutcome {
+        val path = PathGuard.normalize(raw)
+        blocked(path)?.let { return it }
+        if (path == PathGuard.SANDBOX_ROOT) return ToolOutcome.Err("Refusing to delete the workspace root")
+        val file = resolve(raw)
         if (!file.exists()) return ToolOutcome.Err("No such file or directory: $path")
         if (file.isDirectory && !recursive) {
             return ToolOutcome.Err("'$path' is a directory. Pass recursive=true to delete it.")
@@ -118,36 +129,41 @@ class FileTools(private val workspace: File) {
         } catch (e: Exception) {
             false
         }
-        return if (deleted) ToolOutcome.Ok("Deleted $path")
-        else ToolOutcome.Err("Delete failed: $path")
+        return if (deleted) ToolOutcome.Ok("Deleted $path") else ToolOutcome.Err("Delete failed: $path")
     }
 
-    fun makeDirectory(path: String, createParents: Boolean): ToolOutcome {
-        PathGuard.requirePath(path)?.let { return it }
-        val dir = PathGuard.resolve(workspace, path) ?: return PathGuard.outside(path)
+    fun makeDirectory(raw: String, createParents: Boolean): ToolOutcome {
+        val path = PathGuard.normalize(raw)
+        blocked(path)?.let { return it }
+        val dir = resolve(raw)
         if (dir.exists()) {
             return if (dir.isDirectory) ToolOutcome.Ok("Directory already exists: $path")
             else ToolOutcome.Err("A file already exists at $path")
         }
-        val ok = if (createParents) dir.mkdirs() else dir.parentFile?.let { it.exists() || it.mkdirs() }?.let { dir.mkdir() } ?: false
+        val ok = try {
+            if (createParents) dir.mkdirs() else dir.mkdir()
+        } catch (e: Exception) {
+            false
+        }
         return if (ok) ToolOutcome.Ok("Created directory $path")
-        else ToolOutcome.Err("Could not create directory: $path")
+        else ToolOutcome.Err("Could not create directory: $path (missing parent? pass create_parents=true)")
     }
 
-    fun fileExists(path: String): ToolOutcome {
-        PathGuard.requirePath(path)?.let { return it }
-        val file = PathGuard.resolve(workspace, path) ?: return PathGuard.outside(path)
+    fun fileExists(raw: String): ToolOutcome {
+        val path = PathGuard.normalize(raw)
+        val file = resolve(raw)
         return if (file.exists()) {
             val kind = if (file.isDirectory) "Directory" else "File"
-            ToolOutcome.Ok("$kind exists at $path (${if (file.isFile) "${file.length()} bytes" else "directory"})")
+            val size = if (file.isFile) "${file.length()} bytes" else "directory"
+            ToolOutcome.Ok("$kind exists at $path ($size)")
         } else {
             ToolOutcome.Ok("Nothing exists at $path")
         }
     }
 
-    fun fileInfo(path: String): ToolOutcome {
-        PathGuard.requirePath(path)?.let { return it }
-        val file = PathGuard.resolve(workspace, path) ?: return PathGuard.outside(path)
+    fun fileInfo(raw: String): ToolOutcome {
+        val path = PathGuard.normalize(raw)
+        val file = resolve(raw)
         if (!file.exists()) return ToolOutcome.Err("No such file or directory: $path")
         val sb = StringBuilder()
         sb.append("File information for $path:\n")
@@ -155,15 +171,17 @@ class FileTools(private val workspace: File) {
         sb.append("Size: ").append(file.length()).append(" bytes\n")
         sb.append("Readable: ").append(file.canRead()).append('\n')
         sb.append("Writable: ").append(file.canWrite()).append('\n')
+        sb.append("Executable: ").append(file.canExecute()).append('\n')
         sb.append("Last modified: ").append(java.util.Date(file.lastModified())).append('\n')
-        sb.append("Relative path: ").append(file.relativeTo(workspace).path)
+        sb.append("Sandboxed: ").append(PathGuard.inSandbox(path))
         return ToolOutcome.Ok(sb.toString())
     }
 
-    fun findFiles(root: String, pattern: String, maxDepth: Int, caseInsensitive: Boolean): ToolOutcome {
-        PathGuard.requirePath(pattern)?.let { return ToolOutcome.Err("pattern parameter is required") }
-        val base = if (root.isBlank()) workspace.canonicalFile else PathGuard.resolve(workspace, root)
-            ?: return PathGuard.outside(root)
+    fun findFiles(rawRoot: String, pattern: String, maxDepth: Int, caseInsensitive: Boolean): ToolOutcome {
+        if (pattern.isBlank()) return ToolOutcome.Err("pattern parameter is required")
+        val root = PathGuard.normalize(rawRoot)
+        blocked(root)?.let { return it }
+        val base = resolve(rawRoot)
         if (!base.exists()) return ToolOutcome.Err("No such directory: $root")
         val regex = globToRegex(pattern, caseInsensitive)
         val matches = mutableListOf<File>()
@@ -172,7 +190,7 @@ class FileTools(private val workspace: File) {
         val sb = StringBuilder()
         sb.append("Found ${matches.size} match(es) for '$pattern':\n")
         for (m in matches.take(MAX_FIND_RESULTS)) {
-            sb.append(m.relativeTo(workspace).path)
+            sb.append(PathGuard.normalize(m.absolutePath))
             if (m.isFile) sb.append("  (").append(m.length()).append(" bytes)")
             sb.append('\n')
         }

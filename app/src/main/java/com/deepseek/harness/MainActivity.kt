@@ -98,6 +98,10 @@ private fun AppRoot(viewModel: AppViewModel, onOpenBrowser: (String) -> Unit) {
                                 loadingBalance = state.loadingBalance,
                                 conversations = state.conversations,
                                 currentId = state.current?.id,
+                                shizukuInstalled = state.shizukuInstalled,
+                                shizukuRunning = state.shizukuRunning,
+                                shizukuGranted = state.shizukuGranted,
+                                storageGranted = state.storageGranted,
                                 onNewConversation = {
                                     viewModel.newConversation()
                                     scope.launch { drawerState.close() }
@@ -107,7 +111,13 @@ private fun AppRoot(viewModel: AppViewModel, onOpenBrowser: (String) -> Unit) {
                                     scope.launch { drawerState.close() }
                                 },
                                 onDeleteConversation = { viewModel.deleteConversation(it) },
-                                onRefresh = { viewModel.refreshAccount() },
+                                onRefresh = {
+                                    viewModel.refreshAccount()
+                                    viewModel.refreshPermissions()
+                                },
+                                onRequestShizuku = { viewModel.requestShizukuPermission() },
+                                onInstallShizuku = { viewModel.openShizukuInstall() },
+                                onRequestStorage = { viewModel.requestStorageAccess() },
                                 onSignOut = {
                                     viewModel.signOut()
                                     scope.launch { drawerState.close() }

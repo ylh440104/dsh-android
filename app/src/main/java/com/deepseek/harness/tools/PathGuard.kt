@@ -4,26 +4,54 @@ import java.io.File
 
 object PathGuard {
 
-    fun resolve(workspace: File, raw: String): File? {
-        if (raw.isBlank()) return null
-        val cleaned = raw.trim()
-        if (cleaned.contains('\u0000')) return null
-        val candidate = File(workspace, cleaned)
-        val root = workspace.canonicalFile
-        val canonical = try {
-            candidate.canonicalFile
-        } catch (e: Exception) {
-            return null
+    const val SANDBOX_ROOT = "/workspace"
+
+    fun normalize(raw: String): String {
+        val trimmed = raw.trim().replace('\\', '/')
+        if (trimmed.isEmpty()) return SANDBOX_ROOT
+        val absolute = trimmed.startsWith("/")
+        val stack = ArrayDeque<String>()
+        for (segment in trimmed.split('/')) {
+            when {
+                segment.isEmpty() || segment == "." -> {}
+                segment == ".." -> if (stack.isNotEmpty()) stack.removeLast()
+                else -> stack.addLast(segment)
+            }
         }
-        if (canonical.path != root.path && !canonical.path.startsWith(root.path + File.separator)) {
-            return null
+        val joined = stack.joinToString("/")
+        return when {
+            absolute -> "/$joined"
+            joined.isEmpty() -> SANDBOX_ROOT
+            else -> "$SANDBOX_ROOT/$joined"
         }
-        return canonical
     }
+
+    fun inSandbox(path: String): Boolean =
+        path == SANDBOX_ROOT || path.startsWith("$SANDBOX_ROOT/")
+
+    fun isProtected(path: String): Boolean = PROTECTED.any { path == it || path.startsWith("$it/") }
+
+    fun toFile(workspace: File, path: String): File =
+        if (inSandbox(path)) {
+            val relative = path.removePrefix(SANDBOX_ROOT).trimStart('/')
+            if (relative.isEmpty()) workspace else File(workspace, relative)
+        } else {
+            File(path)
+        }
 
     fun requirePath(raw: String): ToolOutcome.Err? =
         if (raw.isBlank()) ToolOutcome.Err("path parameter is required") else null
 
-    fun outside(raw: String): ToolOutcome.Err =
-        ToolOutcome.Err("Invalid path: '$raw'. Path must stay inside the workspace.")
+    private val PROTECTED = listOf(
+        "/system",
+        "/vendor",
+        "/boot",
+        "/dev",
+        "/proc",
+        "/sys",
+        "/init",
+        "/data/misc",
+        "/data/system",
+        "/data/adb"
+    )
 }

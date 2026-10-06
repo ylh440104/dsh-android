@@ -118,7 +118,7 @@ private fun AppRoot(viewModel: AppViewModel, onOpenBrowser: (String) -> Unit) {
                                 },
                                 onDeleteConversation = { viewModel.deleteConversation(it) },
                                 onRefresh = {
-                                    viewModel.refreshAccount()
+                                    viewModel.refreshAllBalances()
                                     viewModel.refreshPermissions()
                                 },
                                 onRequestShizuku = { viewModel.requestShizukuPermission() },

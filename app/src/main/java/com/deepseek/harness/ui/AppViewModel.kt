@@ -15,7 +15,6 @@ import com.deepseek.harness.auth.Pkce
 import com.deepseek.harness.data.AccountStore
 import com.deepseek.harness.data.ConversationStore
 import com.deepseek.harness.data.CredentialStore
-import com.deepseek.harness.model.BUILTIN_MODELS
 import com.deepseek.harness.model.ChatMessage
 import com.deepseek.harness.model.Conversation
 import com.deepseek.harness.model.ModelInfo

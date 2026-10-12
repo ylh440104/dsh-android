@@ -30,7 +30,8 @@ fun SignInScreen(
     busy: Boolean,
     statusText: String?,
     onSignIn: () -> Unit,
-    onUseApiKey: () -> Unit
+    onUseApiKey: () -> Unit,
+    onUseCustom: () -> Unit
 ) {
     Box(
         modifier = Modifier
@@ -98,6 +99,14 @@ fun SignInScreen(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text("改用 API Key", fontSize = 14.sp)
+            }
+            Spacer(Modifier.height(4.dp))
+            TextButton(
+                onClick = onUseCustom,
+                enabled = !busy,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("使用其他服务", fontSize = 14.sp)
             }
             if (statusText != null) {
                 Spacer(Modifier.height(18.dp))

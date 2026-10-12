@@ -28,6 +28,7 @@ class ChatEngine(
         sink: MessageSink,
         token: String? = null,
         apiKeyMode: Boolean = false,
+        baseUrl: String = "",
         onFinished: () -> Unit
     ): RunResult {
         val messages = if (apiKeyMode) buildOpenAiHistory(history) else buildHistory(history)
@@ -62,7 +63,7 @@ class ChatEngine(
                 }
             }
             if (apiKeyMode) {
-                inference.streamOpenAi(model, SYSTEM_PROMPT, messages, specs, MAX_TOKENS, token.orEmpty(), handler)
+                inference.streamOpenAi(model, SYSTEM_PROMPT, messages, specs, MAX_TOKENS, token.orEmpty(), baseUrl, handler)
             } else {
                 inference.stream(model, SYSTEM_PROMPT, messages, specs, MAX_TOKENS, true, token, handler)
             }

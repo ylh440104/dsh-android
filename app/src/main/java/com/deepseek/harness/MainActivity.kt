@@ -29,6 +29,7 @@ import com.deepseek.harness.ui.ApiKeyDialog
 import com.deepseek.harness.ui.AppDrawer
 import com.deepseek.harness.ui.AppViewModel
 import com.deepseek.harness.ui.ChatScreen
+import com.deepseek.harness.ui.CustomProviderDialog
 import com.deepseek.harness.ui.DshTheme
 import com.deepseek.harness.ui.SignInScreen
 import kotlinx.coroutines.launch
@@ -90,7 +91,8 @@ private fun AppRoot(viewModel: AppViewModel, onOpenBrowser: (String) -> Unit) {
                     onUseApiKey = {
                         viewModel.clearApiKeyError()
                         showApiKeyDialog = true
-                    }
+                    },
+                    onUseCustom = { viewModel.openCustomForm() }
                 )
             } else {
                 ModalNavigationDrawer(
@@ -118,9 +120,19 @@ private fun AppRoot(viewModel: AppViewModel, onOpenBrowser: (String) -> Unit) {
                                     showApiKeyDialog = true
                                     scope.launch { drawerState.close() }
                                 },
+                                onAddCustom = {
+                                    viewModel.openCustomForm()
+                                    scope.launch { drawerState.close() }
+                                },
                                 onSwitchAccount = { viewModel.switchAccount(it) },
                                 onRemoveAccount = { viewModel.removeAccount(it) },
                                 onToggleAutoSwitch = { viewModel.toggleAutoSwitch() },
+                                refreshingModels = state.refreshingModels,
+                                onRefreshModels = { viewModel.refreshModelsFor(it) },
+                                onSelectAccountModel = { id, model ->
+                                    viewModel.switchAccount(id)
+                                    viewModel.selectAccountModel(model)
+                                },
                                 onNewConversation = {
                                     viewModel.newConversation()
                                     scope.launch { drawerState.close() }
@@ -159,6 +171,20 @@ private fun AppRoot(viewModel: AppViewModel, onOpenBrowser: (String) -> Unit) {
                 }
             }
         }
+    }
+
+    if (state.customFormOpen) {
+        CustomProviderDialog(
+            busy = state.customBusy,
+            errorText = state.customError,
+            models = state.customModels,
+            resolvedBaseUrl = state.customBaseUrl,
+            onDismiss = { viewModel.closeCustomForm() },
+            onFetchModels = { base, key -> viewModel.fetchCustomModels(base, key) },
+            onConfirm = { base, key, label, models ->
+                viewModel.saveCustomProvider(base, key, label, models)
+            }
+        )
     }
 
     if (showApiKeyDialog) {

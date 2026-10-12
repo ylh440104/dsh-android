@@ -138,6 +138,7 @@ class InferenceClient(
         tools: List<ToolSpec>,
         maxTokens: Int,
         apiKey: String,
+        baseUrl: String = "",
         onEvent: (StreamEvent) -> Unit
     ) {
         val body = JSONObject()
@@ -158,13 +159,14 @@ class InferenceClient(
             body.put("tools", arr)
         }
 
-        val req = Request.Builder()
-            .url("$origin/chat/completions")
-            .header("Authorization", "Bearer $apiKey")
+        val endpoint = if (baseUrl.isBlank()) origin else baseUrl
+        val builder = Request.Builder()
+            .url("$endpoint/chat/completions")
             .header("accept", "text/event-stream")
             .header("content-type", "application/json")
             .post(body.toString().toRequestBody(JSON))
-            .build()
+        if (apiKey.isNotBlank()) builder.header("Authorization", "Bearer $apiKey")
+        val req = builder.build()
 
         var attempt = 0
         while (true) {

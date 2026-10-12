@@ -73,6 +73,53 @@ class AccountStore(context: Context) {
         return stored
     }
 
+    fun addCustomProvider(baseUrl: String, apiKey: String, label: String, models: List<String>): StoredAccount {
+        val accounts = list().toMutableList()
+        val existing = accounts.firstOrNull { it.isCustom && it.baseUrl == baseUrl && it.token == apiKey }
+        if (existing != null) {
+            existing.name = label.ifBlank { existing.name }
+            existing.models = models.toMutableList()
+            if (existing.selectedModel.isEmpty() || existing.selectedModel !in models) {
+                existing.selectedModel = models.firstOrNull().orEmpty()
+            }
+            save(accounts)
+            return existing
+        }
+        val stored = StoredAccount(
+            localId = UUID.randomUUID().toString(),
+            token = apiKey,
+            name = label.ifBlank { null },
+            kind = StoredAccount.KIND_CUSTOM,
+            baseUrl = baseUrl,
+            models = models.toMutableList(),
+            selectedModel = models.firstOrNull().orEmpty()
+        )
+        accounts.add(stored)
+        save(accounts)
+        return stored
+    }
+
+    fun updateModels(localId: String, models: List<String>, baseUrl: String) {
+        val accounts = list().toMutableList()
+        val index = accounts.indexOfFirst { it.localId == localId }
+        if (index < 0) return
+        val account = accounts[index]
+        account.models = models.toMutableList()
+        if (baseUrl.isNotBlank()) account.baseUrl = baseUrl
+        if (account.selectedModel.isEmpty() || account.selectedModel !in models) {
+            account.selectedModel = models.firstOrNull().orEmpty()
+        }
+        save(accounts)
+    }
+
+    fun selectModel(localId: String, model: String) {
+        val accounts = list().toMutableList()
+        val index = accounts.indexOfFirst { it.localId == localId }
+        if (index < 0) return
+        accounts[index].selectedModel = model
+        save(accounts)
+    }
+
     fun rename(localId: String, label: String) {
         val accounts = list().toMutableList()
         val index = accounts.indexOfFirst { it.localId == localId }

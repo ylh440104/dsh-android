@@ -33,6 +33,9 @@ data class StoredAccount(
     var avatarUrl: String? = null,
     var remoteId: String? = null,
     var kind: String = KIND_OAUTH,
+    var baseUrl: String = "",
+    var models: MutableList<String> = mutableListOf(),
+    var selectedModel: String = "",
     var normalText: String = "",
     var bonusText: String = "",
     var normalValue: Double = 0.0,
@@ -45,55 +48,118 @@ data class StoredAccount(
 
     val isApiKey: Boolean get() = kind == KIND_APIKEY
 
+    val isCustom: Boolean get() = kind == KIND_CUSTOM
+
+    val usesOpenAiProtocol: Boolean get() = isApiKey || isCustom
+
     val displayName: String
         get() = name?.takeIf { it.isNotBlank() }
             ?: contact?.takeIf { it.isNotBlank() }
-            ?: if (isApiKey) "API Key" else "DeepSeek 账号"
+            ?: when (kind) {
+                KIND_APIKEY -> "DeepSeek API Key"
+                KIND_CUSTOM -> hostLabel(baseUrl)
+                else -> "DeepSeek 账号"
+            }
 
-    val modeLabel: String get() = if (isApiKey) "API Key" else "账号登录"
+    val modeLabel: String get() = when (kind) {
+        KIND_APIKEY -> "API Key"
+        KIND_CUSTOM -> "自定义"
+        else -> "账号登录"
+    }
 
     val balanceLine: String
         get() = when {
             lastError != null -> lastError!!
+            isCustom -> if (models.isEmpty()) "模型列表未获取" else "${models.size} 个模型"
             normalText.isBlank() && bonusText.isBlank() -> "额度未知"
             bonusText.isBlank() -> normalText
             else -> "$normalText  ·  赠送 $bonusText"
         }
 
-    fun toJson(): JSONObject = JSONObject()
-        .put("localId", localId)
-        .put("name", name ?: "")
-        .put("contact", contact ?: "")
-        .put("avatarUrl", avatarUrl ?: "")
-        .put("remoteId", remoteId ?: "")
-        .put("kind", kind)
-        .put("normalText", normalText)
-        .put("bonusText", bonusText)
-        .put("normalValue", normalValue)
-        .put("bonusValue", bonusValue)
-        .put("quotaExhausted", quotaExhausted)
-        .put("lastUpdated", lastUpdated)
+    fun toJson(): JSONObject {
+        val modelArray = JSONArray()
+        for (model in models) modelArray.put(model)
+        return JSONObject()
+            .put("localId", localId)
+            .put("name", name ?: "")
+            .put("contact", contact ?: "")
+            .put("avatarUrl", avatarUrl ?: "")
+            .put("remoteId", remoteId ?: "")
+            .put("kind", kind)
+            .put("baseUrl", baseUrl)
+            .put("models", modelArray)
+            .put("selectedModel", selectedModel)
+            .put("normalText", normalText)
+            .put("bonusText", bonusText)
+            .put("normalValue", normalValue)
+            .put("bonusValue", bonusValue)
+            .put("quotaExhausted", quotaExhausted)
+            .put("lastUpdated", lastUpdated)
+    }
 
     companion object {
         const val KIND_OAUTH = "oauth"
         const val KIND_APIKEY = "apikey"
+        const val KIND_CUSTOM = "custom"
 
-        fun fromJson(json: JSONObject, token: String): StoredAccount = StoredAccount(
-            localId = json.optString("localId", ""),
-            token = token,
-            name = json.optString("name", "").ifEmpty { null },
-            contact = json.optString("contact", "").ifEmpty { null },
-            avatarUrl = json.optString("avatarUrl", "").ifEmpty { null },
-            remoteId = json.optString("remoteId", "").ifEmpty { null },
-            kind = json.optString("kind", KIND_OAUTH).ifEmpty { KIND_OAUTH },
-            normalText = json.optString("normalText", ""),
-            bonusText = json.optString("bonusText", ""),
-            normalValue = json.optDouble("normalValue", 0.0),
-            bonusValue = json.optDouble("bonusValue", 0.0),
-            quotaExhausted = json.optBoolean("quotaExhausted", false),
-            lastUpdated = json.optLong("lastUpdated", 0L)
-        )
+        fun fromJson(json: JSONObject, token: String): StoredAccount {
+            val modelArray = json.optJSONArray("models")
+            val models = mutableListOf<String>()
+            if (modelArray != null) {
+                for (i in 0 until modelArray.length()) {
+                    val value = modelArray.optString(i, "")
+                    if (value.isNotEmpty()) models.add(value)
+                }
+            }
+            return StoredAccount(
+                localId = json.optString("localId", ""),
+                token = token,
+                name = json.optString("name", "").ifEmpty { null },
+                contact = json.optString("contact", "").ifEmpty { null },
+                avatarUrl = json.optString("avatarUrl", "").ifEmpty { null },
+                remoteId = json.optString("remoteId", "").ifEmpty { null },
+                kind = json.optString("kind", KIND_OAUTH).ifEmpty { KIND_OAUTH },
+                baseUrl = json.optString("baseUrl", ""),
+                models = models,
+                selectedModel = json.optString("selectedModel", ""),
+                normalText = json.optString("normalText", ""),
+                bonusText = json.optString("bonusText", ""),
+                normalValue = json.optDouble("normalValue", 0.0),
+                bonusValue = json.optDouble("bonusValue", 0.0),
+                quotaExhausted = json.optBoolean("quotaExhausted", false),
+                lastUpdated = json.optLong("lastUpdated", 0L)
+            )
+        }
     }
+}
+
+fun hostLabel(url: String): String {
+    if (url.isBlank()) return "自定义服务"
+    return runCatching { java.net.URI(url).host ?: url }.getOrDefault(url)
+}
+
+fun normalizeBaseUrl(input: String): String {
+    var value = input.trim()
+    if (value.isEmpty()) return ""
+    if (!value.startsWith("http://") && !value.startsWith("https://")) {
+        value = "https://$value"
+    }
+    value = value.trimEnd('/')
+    for (suffix in listOf("/chat/completions", "/completions", "/models")) {
+        if (value.endsWith(suffix)) value = value.removeSuffix(suffix).trimEnd('/')
+    }
+    return value
+}
+
+fun baseUrlCandidates(input: String): List<String> {
+    val base = normalizeBaseUrl(input)
+    if (base.isEmpty()) return emptyList()
+    val out = mutableListOf(base)
+    val path = runCatching { java.net.URI(base).path.orEmpty() }.getOrDefault("")
+    if (path.isBlank() || path == "/") {
+        out.add("$base/v1")
+    }
+    return out.distinct()
 }
 
 fun maskApiKey(key: String): String =

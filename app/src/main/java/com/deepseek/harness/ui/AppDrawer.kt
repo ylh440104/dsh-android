@@ -10,12 +10,15 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
@@ -29,8 +32,13 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -53,9 +61,13 @@ fun AppDrawer(
     storageGranted: Boolean,
     onAddAccount: () -> Unit,
     onAddApiKey: () -> Unit,
+    onAddCustom: () -> Unit,
     onSwitchAccount: (String) -> Unit,
     onRemoveAccount: (String) -> Unit,
     onToggleAutoSwitch: () -> Unit,
+    refreshingModels: Boolean,
+    onRefreshModels: (String) -> Unit,
+    onSelectAccountModel: (String, String) -> Unit,
     onNewConversation: () -> Unit,
     onOpenConversation: (String) -> Unit,
     onDeleteConversation: (String) -> Unit,
@@ -80,9 +92,13 @@ fun AppDrawer(
                 loadingBalance = loadingBalance,
                 onAddAccount = onAddAccount,
                 onAddApiKey = onAddApiKey,
+                onAddCustom = onAddCustom,
                 onSwitchAccount = onSwitchAccount,
                 onRemoveAccount = onRemoveAccount,
                 onToggleAutoSwitch = onToggleAutoSwitch,
+                refreshingModels = refreshingModels,
+                onRefreshModels = onRefreshModels,
+                onSelectAccountModel = onSelectAccountModel,
                 onRefresh = onRefresh
             )
 
@@ -160,9 +176,13 @@ private fun AccountPanel(
     loadingBalance: Boolean,
     onAddAccount: () -> Unit,
     onAddApiKey: () -> Unit,
+    onAddCustom: () -> Unit,
     onSwitchAccount: (String) -> Unit,
     onRemoveAccount: (String) -> Unit,
     onToggleAutoSwitch: () -> Unit,
+    refreshingModels: Boolean,
+    onRefreshModels: (String) -> Unit,
+    onSelectAccountModel: (String, String) -> Unit,
     onRefresh: () -> Unit
 ) {
     Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 16.dp)) {
@@ -202,6 +222,13 @@ private fun AccountPanel(
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.clickable { onAddApiKey() }
+            )
+            Spacer(Modifier.width(10.dp))
+            Text(
+                "自定义",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.clickable { onAddCustom() }
             )
         }
 
@@ -244,6 +271,14 @@ private fun AccountPanel(
                 onSwitch = { onSwitchAccount(account.localId) },
                 onRemove = { onRemoveAccount(account.localId) }
             )
+            if (account.isCustom) {
+                CustomModelPicker(
+                    account = account,
+                    refreshing = refreshingModels,
+                    onRefreshModels = { onRefreshModels(account.localId) },
+                    onSelectModel = { onSelectAccountModel(account.localId, it) }
+                )
+            }
             Spacer(Modifier.height(6.dp))
         }
 
@@ -335,14 +370,18 @@ private fun AccountRow(
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    if (account.isApiKey) {
-                        Spacer(Modifier.width(6.dp))
-                        Text(
-                            com.deepseek.harness.model.maskApiKey(account.token),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        when {
+                            account.isCustom -> account.baseUrl
+                            account.isApiKey -> com.deepseek.harness.model.maskApiKey(account.token)
+                            else -> account.contact.orEmpty()
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 }
                 Spacer(Modifier.height(2.dp))
                 Text(
@@ -370,6 +409,91 @@ private fun AccountRow(
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(16.dp)
                     )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CustomModelPicker(
+    account: StoredAccount,
+    refreshing: Boolean,
+    onRefreshModels: () -> Unit,
+    onSelectModel: (String) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Surface(
+        color = MaterialTheme.colorScheme.surface,
+        shape = RoundedCornerShape(10.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 18.dp, end = 12.dp, bottom = 6.dp)
+    ) {
+        Column {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { expanded = !expanded }
+                    .padding(vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "模型",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    account.selectedModel.ifBlank { "未选择" },
+                    style = MaterialTheme.typography.labelSmall,
+                    fontFamily = FontFamily.Monospace,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
+                if (refreshing) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(12.dp),
+                        strokeWidth = 1.5.dp,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                } else {
+                    Text(
+                        "刷新",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.clickable { onRefreshModels() }
+                    )
+                }
+            }
+            if (expanded) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 160.dp)
+                        .verticalScroll(rememberScrollState())
+                ) {
+                    for (model in account.models) {
+                        val selected = model == account.selectedModel
+                        Text(
+                            model,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontFamily = FontFamily.Monospace,
+                            color = if (selected) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    onSelectModel(model)
+                                    expanded = false
+                                }
+                                .padding(vertical = 5.dp)
+                        )
+                    }
                 }
             }
         }

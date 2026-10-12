@@ -5,6 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.deepseek.harness.api.ApiKeyClient
 import com.deepseek.harness.api.ChatEngine
+import com.deepseek.harness.api.CustomProviderClient
 import com.deepseek.harness.api.InferenceClient
 import com.deepseek.harness.api.MessageSink
 import com.deepseek.harness.api.PlatformClient
@@ -20,9 +21,11 @@ import com.deepseek.harness.model.Conversation
 import com.deepseek.harness.model.ModelInfo
 import com.deepseek.harness.model.StoredAccount
 import com.deepseek.harness.model.formatAmount
+import com.deepseek.harness.model.hostLabel
 import com.deepseek.harness.model.looksLikeApiKey
 import com.deepseek.harness.model.maskApiKey
 import com.deepseek.harness.model.modelsFor
+import com.deepseek.harness.model.normalizeBaseUrl
 import com.deepseek.harness.shell.ShizukuManager
 import com.deepseek.harness.tools.ToolRegistry
 import kotlinx.coroutines.Dispatchers
@@ -54,14 +57,27 @@ data class UiState(
     val signingInLabel: String = "",
     val addingApiKey: Boolean = false,
     val apiKeyError: String? = null,
+    val customFormOpen: Boolean = false,
+    val customBusy: Boolean = false,
+    val customError: String? = null,
+    val customModels: List<String> = emptyList(),
+    val customBaseUrl: String = "",
+    val refreshingModels: Boolean = false,
     val shizukuInstalled: Boolean = false,
     val shizukuRunning: Boolean = false,
     val shizukuGranted: Boolean = false,
     val storageGranted: Boolean = false
 ) {
     val active: StoredAccount? get() = accounts.firstOrNull { it.localId == activeId }
-    val apiKeyMode: Boolean get() = active?.isApiKey == true
-    val availableModels: List<ModelInfo> get() = modelsFor(apiKeyMode)
+    val apiKeyMode: Boolean get() = active?.usesOpenAiProtocol == true
+    val availableModels: List<ModelInfo>
+        get() {
+            val current = active ?: return modelsFor(false)
+            if (current.isCustom) {
+                return current.models.map { ModelInfo(it, it, "来自 ${hostLabel(current.baseUrl)}") }
+            }
+            return modelsFor(current.usesOpenAiProtocol)
+        }
 }
 
 class AppViewModel(app: Application) : AndroidViewModel(app) {
@@ -71,6 +87,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val conversations = ConversationStore(app)
     private val platform = PlatformClient()
     private val apiKeys = ApiKeyClient()
+    private val customProviders = CustomProviderClient()
     private val inference = InferenceClient(
         tokenProvider = { activeToken() },
         userIdProvider = { credentials.anonymousUserId() },
@@ -199,7 +216,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setModel(model: String) {
         credentials.saveModel(model)
-        _state.value = _state.value.copy(model = model)
+        val active = _state.value.active
+        if (active != null && active.isCustom) {
+            accountStore.selectModel(active.localId, model)
+        }
+        _state.value = _state.value.copy(
+            model = model,
+            accounts = accountStore.list()
+        )
     }
 
     fun toggleReasoning() {
@@ -219,14 +243,22 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val accounts = accountStore.list()
         val target = accounts.firstOrNull { it.localId == localId } ?: return
         accountStore.setActive(localId)
-        val models = modelsFor(target.isApiKey)
-        val currentModel = _state.value.model
-        val nextModel = if (models.any { it.id == currentModel }) currentModel else models.first().id
-        credentials.saveModel(nextModel)
+        val nextModel = when {
+            target.isCustom -> target.selectedModel.ifBlank { target.models.firstOrNull().orEmpty() }
+            else -> {
+                val models = modelsFor(target.usesOpenAiProtocol)
+                val currentModel = _state.value.model
+                if (models.any { it.id == currentModel }) currentModel else models.first().id
+            }
+        }
+        if (nextModel.isNotEmpty()) {
+            credentials.saveModel(nextModel)
+            if (target.isCustom) accountStore.selectModel(localId, nextModel)
+        }
         _state.value = _state.value.copy(
             activeId = localId,
-            accounts = accounts,
-            model = nextModel,
+            accounts = accountStore.list(),
+            model = if (nextModel.isNotEmpty()) nextModel else _state.value.model,
             info = "已切换到 ${target.displayName}"
         )
         refreshAccount(localId)
@@ -283,6 +315,22 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun refreshOne(account: StoredAccount) {
+        if (account.isCustom) {
+            runCatching {
+                val probe = customProviders.fetchModels(account.baseUrl, account.token)
+                account.baseUrl = probe.baseUrl
+                account.models = probe.models.toMutableList()
+                if (account.selectedModel.isEmpty() || account.selectedModel !in probe.models) {
+                    account.selectedModel = probe.models.firstOrNull().orEmpty()
+                }
+                account.lastError = null
+                account.quotaExhausted = false
+                account.lastUpdated = System.currentTimeMillis()
+            }.onFailure { e ->
+                account.lastError = e.message ?: "无法连接该服务"
+            }
+            return
+        }
         if (account.isApiKey) {
             runCatching {
                 val balance = apiKeys.fetchBalance(account.token)
@@ -364,6 +412,124 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun clearApiKeyError() {
         _state.value = _state.value.copy(apiKeyError = null)
+    }
+
+    fun openCustomForm() {
+        _state.value = _state.value.copy(
+            customFormOpen = true,
+            customError = null,
+            customModels = emptyList(),
+            customBaseUrl = "",
+            customBusy = false
+        )
+    }
+
+    fun closeCustomForm() {
+        _state.value = _state.value.copy(
+            customFormOpen = false,
+            customError = null,
+            customModels = emptyList(),
+            customBaseUrl = "",
+            customBusy = false
+        )
+    }
+
+    fun fetchCustomModels(baseUrl: String, apiKey: String) {
+        val normalized = normalizeBaseUrl(baseUrl)
+        if (normalized.isEmpty()) {
+            _state.value = _state.value.copy(customError = "请填写接口地址")
+            return
+        }
+        if (_state.value.customBusy) return
+        _state.value = _state.value.copy(customBusy = true, customError = null, customModels = emptyList())
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching { customProviders.fetchModels(baseUrl, apiKey) }
+            }
+            result.onSuccess { probe ->
+                _state.value = _state.value.copy(
+                    customBusy = false,
+                    customError = null,
+                    customModels = probe.models,
+                    customBaseUrl = probe.baseUrl
+                )
+            }.onFailure { e ->
+                _state.value = _state.value.copy(
+                    customBusy = false,
+                    customError = e.message ?: "无法获取模型列表"
+                )
+            }
+        }
+    }
+
+    fun saveCustomProvider(baseUrl: String, apiKey: String, label: String, models: List<String>) {
+        if (models.isEmpty()) {
+            _state.value = _state.value.copy(customError = "请先获取模型列表")
+            return
+        }
+        val normalized = normalizeBaseUrl(baseUrl)
+        val stored = accountStore.addCustomProvider(normalized, apiKey.trim(), label, models)
+        val accounts = accountStore.list()
+        accountStore.setActive(stored.localId)
+        credentials.saveModel(stored.selectedModel)
+        _state.value = _state.value.copy(
+            accounts = accounts,
+            activeId = stored.localId,
+            signedIn = true,
+            customFormOpen = false,
+            customError = null,
+            customModels = emptyList(),
+            customBaseUrl = "",
+            totalBalanceText = totalText(accounts),
+            model = stored.selectedModel,
+            info = "已添加 ${stored.displayName}"
+        )
+    }
+
+    fun refreshModelsFor(localId: String) {
+        if (_state.value.refreshingModels) return
+        _state.value = _state.value.copy(refreshingModels = true)
+        viewModelScope.launch {
+            val accounts = withContext(Dispatchers.IO) {
+                val list = accountStore.list()
+                val target = list.firstOrNull { it.localId == localId }
+                if (target != null) {
+                    val probe = runCatching { customProviders.fetchModels(target.baseUrl, target.token) }
+                    probe.onSuccess { result ->
+                        target.baseUrl = result.baseUrl
+                        target.models = result.models.toMutableList()
+                        if (target.selectedModel.isEmpty() || target.selectedModel !in result.models) {
+                            target.selectedModel = result.models.firstOrNull().orEmpty()
+                        }
+                        target.lastError = null
+                    }.onFailure { e ->
+                        target.lastError = e.message ?: "无法获取模型列表"
+                    }
+                    accountStore.updateAll(list)
+                }
+                list
+            }
+            val active = accounts.firstOrNull { it.localId == _state.value.activeId }
+            val nextModel = active?.selectedModel.orEmpty()
+            if (nextModel.isNotEmpty()) credentials.saveModel(nextModel)
+            _state.value = _state.value.copy(
+                accounts = accounts,
+                refreshingModels = false,
+                model = if (nextModel.isNotEmpty()) nextModel else _state.value.model,
+                totalBalanceText = totalText(accounts),
+                info = "模型列表已更新"
+            )
+        }
+    }
+
+    fun selectAccountModel(model: String) {
+        val activeId = _state.value.activeId ?: return
+        accountStore.selectModel(activeId, model)
+        credentials.saveModel(model)
+        _state.value = _state.value.copy(
+            model = model,
+            accounts = accountStore.list()
+        )
     }
 
     private fun pickNextAccount(currentId: String): StoredAccount? {
@@ -561,8 +727,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     history,
                     sinkFor(conversation),
                     account.token,
-                    account.isApiKey
-                ) {}
+                    account.usesOpenAiProtocol,
+                    if (account.isCustom) account.baseUrl else "",
+                    {}
+                )
             }
             when (result) {
                 is RunResult.Ok -> return

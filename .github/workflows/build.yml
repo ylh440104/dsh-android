@@ -87,6 +87,18 @@ jobs:
             grep -q "\"$t\"" $F || (echo "missing tool $t" && exit 1)
           done
           echo "tool surface present"
+      - name: Assert custom provider mode present
+        run: |
+          test -f app/src/main/java/com/deepseek/harness/api/CustomProviderClient.kt || (echo "custom provider client missing" && exit 1)
+          test -f app/src/main/java/com/deepseek/harness/ui/CustomProviderDialog.kt || (echo "custom provider dialog missing" && exit 1)
+          grep -q 'KIND_CUSTOM' app/src/main/java/com/deepseek/harness/model/Models.kt
+          grep -q 'baseUrlCandidates' app/src/main/java/com/deepseek/harness/model/Models.kt
+          grep -q 'normalizeBaseUrl' app/src/main/java/com/deepseek/harness/model/Models.kt
+          grep -q '/models' app/src/main/java/com/deepseek/harness/api/CustomProviderClient.kt
+          grep -q 'fetchCustomModels' app/src/main/java/com/deepseek/harness/ui/AppViewModel.kt
+          grep -q 'refreshModelsFor' app/src/main/java/com/deepseek/harness/ui/AppViewModel.kt
+          grep -q 'CustomModelPicker' app/src/main/java/com/deepseek/harness/ui/AppDrawer.kt
+          echo "custom provider present"
       - name: Assert api key mode present
         run: |
           test -f app/src/main/java/com/deepseek/harness/api/ApiKeyClient.kt || (echo "api key client missing" && exit 1)

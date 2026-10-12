@@ -131,6 +131,191 @@ class InferenceClient(
 
     private fun isRetryable(code: Int): Boolean = code == 429 || code == 408 || code >= 500
 
+    fun streamOpenAi(
+        model: String,
+        system: String,
+        messages: JSONArray,
+        tools: List<ToolSpec>,
+        maxTokens: Int,
+        apiKey: String,
+        onEvent: (StreamEvent) -> Unit
+    ) {
+        val body = JSONObject()
+            .put("model", model)
+            .put("stream", true)
+            .put("max_tokens", maxTokens)
+            .put("messages", openAiMessages(system, messages))
+        if (tools.isNotEmpty()) {
+            val arr = JSONArray()
+            for (t in tools) {
+                arr.put(JSONObject()
+                    .put("type", "function")
+                    .put("function", JSONObject()
+                        .put("name", t.name)
+                        .put("description", t.description)
+                        .put("parameters", t.schema)))
+            }
+            body.put("tools", arr)
+        }
+
+        val req = Request.Builder()
+            .url("$origin/chat/completions")
+            .header("Authorization", "Bearer $apiKey")
+            .header("accept", "text/event-stream")
+            .header("content-type", "application/json")
+            .post(body.toString().toRequestBody(JSON))
+            .build()
+
+        var attempt = 0
+        while (true) {
+            var retry = false
+            var delay = 0L
+            try {
+                http.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) {
+                        val text = resp.body?.string().orEmpty()
+                        if (isRetryable(resp.code) && attempt < MAX_RETRIES) {
+                            retry = true
+                            delay = backoffMs(attempt, resp.header("retry-after"))
+                        } else {
+                            onEvent(StreamEvent.Failed(
+                                describeOpenAiError(resp.code, text),
+                                quotaExhausted = resp.code == 402 || isQuotaError(resp.code, text),
+                                unauthorized = resp.code == 401 || resp.code == 403
+                            ))
+                            return
+                        }
+                    } else {
+                        val source = resp.body?.source()
+                        if (source == null) {
+                            onEvent(StreamEvent.Failed("响应为空"))
+                            return
+                        }
+                        readOpenAiStream(source, onEvent)
+                        return
+                    }
+                }
+            } catch (e: Exception) {
+                if (attempt < MAX_RETRIES) {
+                    retry = true
+                    delay = backoffMs(attempt, null)
+                } else {
+                    onEvent(StreamEvent.Failed("网络错误：${e.message}"))
+                    return
+                }
+            }
+            if (!retry) return
+            attempt++
+            if (attempt > 1) onEvent(StreamEvent.Retrying(attempt))
+            Thread.sleep(delay)
+        }
+    }
+
+    private fun openAiMessages(system: String, messages: JSONArray): JSONArray {
+        val out = JSONArray()
+        if (system.isNotEmpty()) {
+            out.put(JSONObject().put("role", "system").put("content", system))
+        }
+        for (i in 0 until messages.length()) {
+            out.put(messages.optJSONObject(i) ?: continue)
+        }
+        return out
+    }
+
+    private fun readOpenAiStream(source: BufferedSource, onEvent: (StreamEvent) -> Unit) {
+        val toolIds = mutableMapOf<Int, String>()
+        val toolNames = mutableMapOf<Int, String>()
+        val toolJson = mutableMapOf<Int, StringBuilder>()
+
+        while (true) {
+            val line = source.readUtf8Line() ?: break
+            if (!line.startsWith("data:")) continue
+            val payload = line.removePrefix("data:").trim()
+            if (payload.isEmpty()) continue
+            if (payload == "[DONE]") {
+                for ((index, name) in toolNames) {
+                    onEvent(StreamEvent.ToolUse(toolIds[index].orEmpty(), name, toolJson[index]?.toString().orEmpty()))
+                }
+                onEvent(StreamEvent.Done)
+                return
+            }
+            val obj = try {
+                JSONObject(payload)
+            } catch (e: Exception) {
+                continue
+            }
+            val error = obj.optJSONObject("error")
+            if (error != null) {
+                onEvent(StreamEvent.Failed(error.optString("message", "服务返回错误")))
+                return
+            }
+            val usage = obj.optJSONObject("usage")
+            if (usage != null) {
+                onEvent(StreamEvent.Usage(usage.optInt("prompt_tokens", 0), usage.optInt("completion_tokens", 0)))
+            }
+            val choices = obj.optJSONArray("choices") ?: continue
+            val choice = choices.optJSONObject(0) ?: continue
+            val delta = choice.optJSONObject("delta")
+            if (delta != null) {
+                val content = delta.optString("content", "")
+                if (content.isNotEmpty()) onEvent(StreamEvent.Text(content))
+                val reasoning = delta.optString("reasoning_content", "")
+                if (reasoning.isNotEmpty()) onEvent(StreamEvent.Reasoning(reasoning))
+                val calls = delta.optJSONArray("tool_calls")
+                if (calls != null) {
+                    for (i in 0 until calls.length()) {
+                        val call = calls.optJSONObject(i) ?: continue
+                        val index = call.optInt("index", i)
+                        val id = call.optString("id", "")
+                        if (id.isNotEmpty()) toolIds[index] = id
+                        val function = call.optJSONObject("function") ?: continue
+                        val name = function.optString("name", "")
+                        if (name.isNotEmpty()) toolNames[index] = name
+                        val args = function.optString("arguments", "")
+                        if (args.isNotEmpty()) {
+                            toolJson.getOrPut(index) { StringBuilder() }.append(args)
+                        }
+                    }
+                }
+            }
+            val finish = choice.optString("finish_reason", "")
+            if (finish == "tool_calls" || finish == "stop") {
+                for ((index, name) in toolNames) {
+                    onEvent(StreamEvent.ToolUse(toolIds[index].orEmpty(), name, toolJson[index]?.toString().orEmpty()))
+                }
+                toolIds.clear()
+                toolNames.clear()
+                toolJson.clear()
+                if (finish == "stop") {
+                    onEvent(StreamEvent.Done)
+                    return
+                }
+            }
+        }
+        onEvent(StreamEvent.Done)
+    }
+
+    private fun describeOpenAiError(code: Int, text: String): String {
+        val detail = try {
+            val obj = JSONObject(text)
+            val err = obj.optJSONObject("error")
+            err?.optString("message", "").orEmpty()
+        } catch (e: Exception) {
+            ""
+        }
+        val prefix = when (code) {
+            401, 403 -> "API Key 无效"
+            402 -> "余额不足"
+            429 -> "请求被限流"
+            else -> "服务返回 HTTP $code"
+        }
+        return when {
+            detail.isNotEmpty() -> "$prefix：$detail"
+            text.isNotBlank() -> "$prefix：${text.take(300)}"
+            else -> prefix
+        }
+    }
+
     private fun isQuotaError(code: Int, text: String): Boolean {
         if (code == 402) return true
         val lower = text.lowercase()

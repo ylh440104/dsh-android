@@ -20,9 +20,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import com.deepseek.harness.ui.ApiKeyDialog
 import com.deepseek.harness.ui.AppDrawer
 import com.deepseek.harness.ui.AppViewModel
 import com.deepseek.harness.ui.ChatScreen
@@ -59,6 +62,7 @@ private fun AppRoot(viewModel: AppViewModel, onOpenBrowser: (String) -> Unit) {
     val snackbarHost = remember { SnackbarHostState() }
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
+    var showApiKeyDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(state.error, state.signedIn) {
         val message = state.error
@@ -82,7 +86,11 @@ private fun AppRoot(viewModel: AppViewModel, onOpenBrowser: (String) -> Unit) {
                 SignInScreen(
                     busy = state.signingIn,
                     statusText = state.info ?: state.error,
-                    onSignIn = { viewModel.signIn(onOpenBrowser) }
+                    onSignIn = { viewModel.signIn(onOpenBrowser) },
+                    onUseApiKey = {
+                        viewModel.clearApiKeyError()
+                        showApiKeyDialog = true
+                    }
                 )
             } else {
                 ModalNavigationDrawer(
@@ -103,6 +111,11 @@ private fun AppRoot(viewModel: AppViewModel, onOpenBrowser: (String) -> Unit) {
                                 storageGranted = state.storageGranted,
                                 onAddAccount = {
                                     viewModel.signIn(onOpenBrowser)
+                                    scope.launch { drawerState.close() }
+                                },
+                                onAddApiKey = {
+                                    viewModel.clearApiKeyError()
+                                    showApiKeyDialog = true
                                     scope.launch { drawerState.close() }
                                 },
                                 onSwitchAccount = { viewModel.switchAccount(it) },
@@ -136,7 +149,7 @@ private fun AppRoot(viewModel: AppViewModel, onOpenBrowser: (String) -> Unit) {
                         conversation = state.current,
                         sending = state.sending,
                         model = state.model,
-                        models = viewModel.models,
+                        models = state.availableModels,
                         showReasoning = state.showReasoning,
                         onMenu = { scope.launch { drawerState.open() } },
                         onSend = { viewModel.send(it) },
@@ -145,6 +158,26 @@ private fun AppRoot(viewModel: AppViewModel, onOpenBrowser: (String) -> Unit) {
                     )
                 }
             }
+        }
+    }
+
+    if (showApiKeyDialog) {
+        ApiKeyDialog(
+            busy = state.addingApiKey,
+            errorText = state.apiKeyError,
+            onDismiss = {
+                showApiKeyDialog = false
+                viewModel.clearApiKeyError()
+            },
+            onConfirm = { key, label ->
+                viewModel.addApiKey(key, label)
+            }
+        )
+    }
+
+    LaunchedEffect(state.accounts.size) {
+        if (state.apiKeyError == null && state.accounts.isNotEmpty()) {
+            showApiKeyDialog = false
         }
     }
 }

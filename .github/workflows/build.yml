@@ -87,6 +87,17 @@ jobs:
             grep -q "\"$t\"" $F || (echo "missing tool $t" && exit 1)
           done
           echo "tool surface present"
+      - name: Assert api key mode present
+        run: |
+          test -f app/src/main/java/com/deepseek/harness/api/ApiKeyClient.kt || (echo "api key client missing" && exit 1)
+          test -f app/src/main/java/com/deepseek/harness/ui/ApiKeyDialog.kt || (echo "api key dialog missing" && exit 1)
+          grep -q 'streamOpenAi' app/src/main/java/com/deepseek/harness/api/InferenceClient.kt
+          grep -q 'chat/completions' app/src/main/java/com/deepseek/harness/api/InferenceClient.kt
+          grep -q 'user/balance' app/src/main/java/com/deepseek/harness/api/ApiKeyClient.kt
+          grep -q 'KIND_APIKEY' app/src/main/java/com/deepseek/harness/model/Models.kt
+          grep -q 'addApiKey' app/src/main/java/com/deepseek/harness/ui/AppViewModel.kt
+          grep -q 'modelsFor' app/src/main/java/com/deepseek/harness/ui/AppViewModel.kt
+          echo "api key mode present"
       - name: Assert multi-account support present
         run: |
           test -f app/src/main/java/com/deepseek/harness/data/AccountStore.kt || (echo "account store missing" && exit 1)

@@ -50,11 +50,35 @@ class AccountStore(context: Context) {
             name = account?.name,
             contact = account?.contact,
             avatarUrl = account?.avatarUrl,
-            remoteId = account?.id
+            remoteId = account?.id,
+            kind = StoredAccount.KIND_OAUTH
         )
         accounts.add(stored)
         save(accounts)
         return stored
+    }
+
+    fun addApiKey(apiKey: String, label: String): StoredAccount {
+        val accounts = list().toMutableList()
+        val existing = accounts.firstOrNull { it.token == apiKey }
+        if (existing != null) return existing
+        val stored = StoredAccount(
+            localId = UUID.randomUUID().toString(),
+            token = apiKey,
+            name = label.ifBlank { null },
+            kind = StoredAccount.KIND_APIKEY
+        )
+        accounts.add(stored)
+        save(accounts)
+        return stored
+    }
+
+    fun rename(localId: String, label: String) {
+        val accounts = list().toMutableList()
+        val index = accounts.indexOfFirst { it.localId == localId }
+        if (index < 0) return
+        accounts[index].name = label.ifBlank { null }
+        save(accounts)
     }
 
     fun remove(localId: String): List<StoredAccount> {

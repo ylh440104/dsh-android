@@ -16,6 +16,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -28,7 +29,8 @@ import androidx.compose.ui.unit.sp
 fun SignInScreen(
     busy: Boolean,
     statusText: String?,
-    onSignIn: () -> Unit
+    onSignIn: () -> Unit,
+    onUseApiKey: () -> Unit
 ) {
     Box(
         modifier = Modifier
@@ -89,6 +91,14 @@ fun SignInScreen(
                 }
                 Text(if (busy) "等待登录…" else "登录 DeepSeek 账号", fontSize = 15.sp)
             }
+            Spacer(Modifier.height(12.dp))
+            TextButton(
+                onClick = onUseApiKey,
+                enabled = !busy,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("改用 API Key", fontSize = 14.sp)
+            }
             if (statusText != null) {
                 Spacer(Modifier.height(18.dp))
                 Text(
@@ -98,15 +108,20 @@ fun SignInScreen(
                     textAlign = TextAlign.Center
                 )
             }
-            Spacer(Modifier.height(40.dp))
+            Spacer(Modifier.height(28.dp))
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(
-                    "登录在系统浏览器中完成",
+                    "登录走官方 OAuth，新账号自带免费额度",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Text(
-                    "本应用只保存登录凭证，不会接触你的密码",
+                    "API Key 模式直连官方接口，Key 只存本机",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    "两种方式都只保存在本机，不会接触你的密码",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

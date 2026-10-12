@@ -27,9 +27,10 @@ class ChatEngine(
         history: List<ChatMessage>,
         sink: MessageSink,
         token: String? = null,
+        apiKeyMode: Boolean = false,
         onFinished: () -> Unit
     ): RunResult {
-        val messages = buildHistory(history)
+        val messages = if (apiKeyMode) buildOpenAiHistory(history) else buildHistory(history)
         val specs = tools.specs()
         var round = 0
 
@@ -41,7 +42,7 @@ class ChatEngine(
             var failure: StreamEvent.Failed? = null
 
             val index = sink.append(ChatMessage("assistant", ""))
-            inference.stream(model, SYSTEM_PROMPT, messages, specs, MAX_TOKENS, true, token) { event ->
+            val handler: (StreamEvent) -> Unit = { event ->
                 when (event) {
                     is StreamEvent.Text -> {
                         textBuf.append(event.delta)
@@ -59,6 +60,11 @@ class ChatEngine(
                     is StreamEvent.Failed -> failure = event
                     else -> {}
                 }
+            }
+            if (apiKeyMode) {
+                inference.streamOpenAi(model, SYSTEM_PROMPT, messages, specs, MAX_TOKENS, token.orEmpty(), handler)
+            } else {
+                inference.stream(model, SYSTEM_PROMPT, messages, specs, MAX_TOKENS, true, token, handler)
             }
 
             val failed = failure
@@ -91,7 +97,23 @@ class ChatEngine(
                     .put("name", tool.name)
                     .put("input", parseInput(tool.input)))
             }
-            messages.put(JSONObject().put("role", "assistant").put("content", assistantBlocks))
+            if (apiKeyMode) {
+                val calls = JSONArray()
+                for (tool in pendingTools) {
+                    calls.put(JSONObject()
+                        .put("id", tool.id)
+                        .put("type", "function")
+                        .put("function", JSONObject()
+                            .put("name", tool.name)
+                            .put("arguments", tool.input.ifBlank { "{}" })))
+                }
+                messages.put(JSONObject()
+                    .put("role", "assistant")
+                    .put("content", textBuf.toString())
+                    .put("tool_calls", calls))
+            } else {
+                messages.put(JSONObject().put("role", "assistant").put("content", assistantBlocks))
+            }
 
             val results = JSONArray()
             for (tool in pendingTools) {
@@ -109,15 +131,24 @@ class ChatEngine(
                     toolInput = tool.input,
                     isError = result.isError
                 ).copy(text = result.content))
-                results.put(JSONObject()
-                    .put("type", "tool_result")
-                    .put("tool_use_id", tool.id)
-                    .put("content", JSONArray().put(JSONObject()
-                        .put("type", "text")
-                        .put("text", result.content)))
-                    .put("is_error", result.isError))
+                if (apiKeyMode) {
+                    messages.put(JSONObject()
+                        .put("role", "tool")
+                        .put("tool_call_id", tool.id)
+                        .put("content", result.content))
+                } else {
+                    results.put(JSONObject()
+                        .put("type", "tool_result")
+                        .put("tool_use_id", tool.id)
+                        .put("content", JSONArray().put(JSONObject()
+                            .put("type", "text")
+                            .put("text", result.content)))
+                        .put("is_error", result.isError))
+                }
             }
-            messages.put(JSONObject().put("role", "user").put("content", results))
+            if (!apiKeyMode) {
+                messages.put(JSONObject().put("role", "user").put("content", results))
+            }
         }
 
         sink.append(ChatMessage("assistant", "已达到工具调用轮次上限，请继续追问。", isError = true))
@@ -141,6 +172,21 @@ class ChatEngine(
                             .put("content", JSONArray().put(JSONObject()
                                 .put("type", "text")
                                 .put("text", m.text))))
+                    }
+                }
+            }
+        }
+        return messages
+    }
+
+    private fun buildOpenAiHistory(history: List<ChatMessage>): JSONArray {
+        val messages = JSONArray()
+        for (m in history) {
+            when (m.role) {
+                "user" -> messages.put(JSONObject().put("role", "user").put("content", m.text))
+                "assistant" -> {
+                    if (m.text.isNotEmpty()) {
+                        messages.put(JSONObject().put("role", "assistant").put("content", m.text))
                     }
                 }
             }

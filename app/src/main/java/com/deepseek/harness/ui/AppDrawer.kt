@@ -52,6 +52,7 @@ fun AppDrawer(
     shizukuGranted: Boolean,
     storageGranted: Boolean,
     onAddAccount: () -> Unit,
+    onAddApiKey: () -> Unit,
     onSwitchAccount: (String) -> Unit,
     onRemoveAccount: (String) -> Unit,
     onToggleAutoSwitch: () -> Unit,
@@ -78,6 +79,7 @@ fun AppDrawer(
                 autoSwitch = autoSwitch,
                 loadingBalance = loadingBalance,
                 onAddAccount = onAddAccount,
+                onAddApiKey = onAddApiKey,
                 onSwitchAccount = onSwitchAccount,
                 onRemoveAccount = onRemoveAccount,
                 onToggleAutoSwitch = onToggleAutoSwitch,
@@ -157,6 +159,7 @@ private fun AccountPanel(
     autoSwitch: Boolean,
     loadingBalance: Boolean,
     onAddAccount: () -> Unit,
+    onAddApiKey: () -> Unit,
     onSwitchAccount: (String) -> Unit,
     onRemoveAccount: (String) -> Unit,
     onToggleAutoSwitch: () -> Unit,
@@ -187,13 +190,18 @@ private fun AccountPanel(
                 )
             }
             Spacer(Modifier.width(14.dp))
-            Icon(
-                Icons.Default.Add,
-                contentDescription = "添加账号",
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier
-                    .size(18.dp)
-                    .clickable { onAddAccount() }
+            Text(
+                "登录",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.clickable { onAddAccount() }
+            )
+            Spacer(Modifier.width(10.dp))
+            Text(
+                "Key",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.clickable { onAddApiKey() }
             )
         }
 
@@ -317,6 +325,22 @@ private fun AccountRow(
                             "已用尽",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.error
+                        )
+                    }
+                }
+                Spacer(Modifier.height(2.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        account.modeLabel,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    if (account.isApiKey) {
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            com.deepseek.harness.model.maskApiKey(account.token),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }

@@ -32,6 +32,7 @@ data class StoredAccount(
     var contact: String? = null,
     var avatarUrl: String? = null,
     var remoteId: String? = null,
+    var kind: String = KIND_OAUTH,
     var normalText: String = "",
     var bonusText: String = "",
     var normalValue: Double = 0.0,
@@ -42,10 +43,14 @@ data class StoredAccount(
 ) {
     val totalValue: Double get() = normalValue + bonusValue
 
+    val isApiKey: Boolean get() = kind == KIND_APIKEY
+
     val displayName: String
         get() = name?.takeIf { it.isNotBlank() }
             ?: contact?.takeIf { it.isNotBlank() }
-            ?: "DeepSeek 账号"
+            ?: if (isApiKey) "API Key" else "DeepSeek 账号"
+
+    val modeLabel: String get() = if (isApiKey) "API Key" else "账号登录"
 
     val balanceLine: String
         get() = when {
@@ -61,6 +66,7 @@ data class StoredAccount(
         .put("contact", contact ?: "")
         .put("avatarUrl", avatarUrl ?: "")
         .put("remoteId", remoteId ?: "")
+        .put("kind", kind)
         .put("normalText", normalText)
         .put("bonusText", bonusText)
         .put("normalValue", normalValue)
@@ -69,6 +75,9 @@ data class StoredAccount(
         .put("lastUpdated", lastUpdated)
 
     companion object {
+        const val KIND_OAUTH = "oauth"
+        const val KIND_APIKEY = "apikey"
+
         fun fromJson(json: JSONObject, token: String): StoredAccount = StoredAccount(
             localId = json.optString("localId", ""),
             token = token,
@@ -76,6 +85,7 @@ data class StoredAccount(
             contact = json.optString("contact", "").ifEmpty { null },
             avatarUrl = json.optString("avatarUrl", "").ifEmpty { null },
             remoteId = json.optString("remoteId", "").ifEmpty { null },
+            kind = json.optString("kind", KIND_OAUTH).ifEmpty { KIND_OAUTH },
             normalText = json.optString("normalText", ""),
             bonusText = json.optString("bonusText", ""),
             normalValue = json.optDouble("normalValue", 0.0),
@@ -84,6 +94,14 @@ data class StoredAccount(
             lastUpdated = json.optLong("lastUpdated", 0L)
         )
     }
+}
+
+fun maskApiKey(key: String): String =
+    if (key.length <= 10) key else key.take(6) + "…" + key.takeLast(4)
+
+fun looksLikeApiKey(value: String): Boolean {
+    val trimmed = value.trim()
+    return trimmed.startsWith("sk-") && trimmed.length >= 20 && !trimmed.contains(' ')
 }
 
 fun formatAmount(value: Double): String {
@@ -117,6 +135,13 @@ val BUILTIN_MODELS = listOf(
     ModelInfo("deepseek-flash", "DeepSeek-V4-Flash", "快速响应，适合日常对话与轻量任务"),
     ModelInfo("deepseek-v4-pro", "DeepSeek-V4-Pro", "更强推理与编码能力，适合复杂任务")
 )
+
+val APIKEY_MODELS = listOf(
+    ModelInfo("deepseek-chat", "deepseek-chat", "官方 API Key 模式，对应 V3 通用对话模型"),
+    ModelInfo("deepseek-reasoner", "deepseek-reasoner", "官方 API Key 模式，对应推理模型")
+)
+
+fun modelsFor(apiKeyMode: Boolean): List<ModelInfo> = if (apiKeyMode) APIKEY_MODELS else BUILTIN_MODELS
 
 fun parseBalance(json: JSONObject): Balance {
     val normalArr = json.optJSONArray("normal_wallets") ?: JSONArray()

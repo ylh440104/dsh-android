@@ -3,6 +3,7 @@ package com.deepseek.harness.ui
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.deepseek.harness.api.ApiKeyClient
 import com.deepseek.harness.api.ChatEngine
 import com.deepseek.harness.api.InferenceClient
 import com.deepseek.harness.api.MessageSink
@@ -20,6 +21,9 @@ import com.deepseek.harness.model.Conversation
 import com.deepseek.harness.model.ModelInfo
 import com.deepseek.harness.model.StoredAccount
 import com.deepseek.harness.model.formatAmount
+import com.deepseek.harness.model.looksLikeApiKey
+import com.deepseek.harness.model.maskApiKey
+import com.deepseek.harness.model.modelsFor
 import com.deepseek.harness.shell.ShizukuManager
 import com.deepseek.harness.tools.ToolRegistry
 import kotlinx.coroutines.Dispatchers
@@ -49,12 +53,16 @@ data class UiState(
     val showReasoning: Boolean = false,
     val signingIn: Boolean = false,
     val signingInLabel: String = "",
+    val addingApiKey: Boolean = false,
+    val apiKeyError: String? = null,
     val shizukuInstalled: Boolean = false,
     val shizukuRunning: Boolean = false,
     val shizukuGranted: Boolean = false,
     val storageGranted: Boolean = false
 ) {
     val active: StoredAccount? get() = accounts.firstOrNull { it.localId == activeId }
+    val apiKeyMode: Boolean get() = active?.isApiKey == true
+    val availableModels: List<ModelInfo> get() = modelsFor(apiKeyMode)
 }
 
 class AppViewModel(app: Application) : AndroidViewModel(app) {
@@ -63,6 +71,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val accountStore = AccountStore(app)
     private val conversations = ConversationStore(app)
     private val platform = PlatformClient()
+    private val apiKeys = ApiKeyClient()
     private val inference = InferenceClient(
         tokenProvider = { activeToken() },
         userIdProvider = { credentials.anonymousUserId() },
@@ -74,7 +83,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val _state = MutableStateFlow(UiState())
     val state: StateFlow<UiState> = _state.asStateFlow()
 
-    val models: List<ModelInfo> = BUILTIN_MODELS
+    val models: List<ModelInfo> get() = _state.value.availableModels
 
     init {
         migrateLegacyToken()
@@ -84,6 +93,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             activeId = accounts.firstOrNull()?.localId
         }
         accountStore.setActive(activeId)
+        val storedModel = credentials.loadModel()
+        val usableModels = modelsFor(accounts.firstOrNull { it.localId == activeId }?.isApiKey == true)
+        val model = if (usableModels.any { it.id == storedModel }) storedModel else usableModels.first().id
+        credentials.saveModel(model)
         _state.value = _state.value.copy(
             signedIn = accounts.isNotEmpty(),
             accounts = accounts,
@@ -91,7 +104,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             autoSwitch = accountStore.autoSwitch(),
             totalBalanceText = totalText(accounts),
             conversations = conversations.list(),
-            model = credentials.loadModel()
+            model = model
         )
         if (accounts.isNotEmpty()) refreshAllBalances()
         refreshPermissions()
@@ -207,9 +220,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val accounts = accountStore.list()
         val target = accounts.firstOrNull { it.localId == localId } ?: return
         accountStore.setActive(localId)
+        val models = modelsFor(target.isApiKey)
+        val currentModel = _state.value.model
+        val nextModel = if (models.any { it.id == currentModel }) currentModel else models.first().id
+        credentials.saveModel(nextModel)
         _state.value = _state.value.copy(
             activeId = localId,
             accounts = accounts,
+            model = nextModel,
             info = "已切换到 ${target.displayName}"
         )
         refreshAccount(localId)
@@ -266,6 +284,25 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun refreshOne(account: StoredAccount) {
+        if (account.isApiKey) {
+            runCatching {
+                val balance = apiKeys.fetchBalance(account.token)
+                accountStore.applyBalance(account, balance)
+            }.onFailure { e ->
+                when ((e as? PlatformException)?.code) {
+                    "expired" -> {
+                        account.lastError = "API Key 无效"
+                        account.quotaExhausted = true
+                    }
+                    "quota" -> {
+                        account.lastError = "余额不足"
+                        account.quotaExhausted = true
+                    }
+                    else -> account.lastError = e.message ?: "余额获取失败"
+                }
+            }
+            return
+        }
         runCatching {
             val profile = platform.fetchAccount(account.token)
             val balance = platform.fetchBalance(account.token)
@@ -282,6 +319,52 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 account.lastError = e.message ?: "额度获取失败"
             }
         }
+    }
+
+    fun addApiKey(rawKey: String, label: String) {
+        val key = rawKey.trim()
+        if (key.isEmpty()) {
+            _state.value = _state.value.copy(apiKeyError = "请填写 API Key")
+            return
+        }
+        if (!looksLikeApiKey(key)) {
+            _state.value = _state.value.copy(apiKeyError = "API Key 格式不对，应以 sk- 开头")
+            return
+        }
+        if (_state.value.addingApiKey) return
+        _state.value = _state.value.copy(addingApiKey = true, apiKeyError = null)
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching { apiKeys.verify(key) }
+            }
+            result.onSuccess { balance ->
+                val stored = accountStore.addApiKey(key, label)
+                if (balance.total() > 0) accountStore.applyBalance(stored, balance)
+                val accounts = accountStore.list()
+                accountStore.setActive(stored.localId)
+                _state.value = _state.value.copy(
+                    accounts = accounts,
+                    activeId = stored.localId,
+                    signedIn = true,
+                    addingApiKey = false,
+                    apiKeyError = null,
+                    totalBalanceText = totalText(accounts),
+                    model = modelsFor(true).first().id,
+                    info = "API Key 已添加（${maskApiKey(key)}）"
+                )
+                credentials.saveModel(modelsFor(true).first().id)
+                refreshAccount(stored.localId)
+            }.onFailure { e ->
+                _state.value = _state.value.copy(
+                    addingApiKey = false,
+                    apiKeyError = e.message ?: "API Key 校验失败"
+                )
+            }
+        }
+    }
+
+    fun clearApiKeyError() {
+        _state.value = _state.value.copy(apiKeyError = null)
     }
 
     private fun pickNextAccount(currentId: String): StoredAccount? {
@@ -474,7 +557,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             }
             val history = conversation.messages.toList()
             val result = withContext(Dispatchers.IO) {
-                engine.run(_state.value.model, history, sinkFor(conversation), account.token) {}
+                engine.run(
+                    _state.value.model,
+                    history,
+                    sinkFor(conversation),
+                    account.token,
+                    account.isApiKey
+                ) {}
             }
             when (result) {
                 is RunResult.Ok -> return
